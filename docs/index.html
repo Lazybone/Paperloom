@@ -1,0 +1,192 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paperloom — Web Installer</title>
+  <meta name="description" content="Install Paperloom firmware on your LilyGo T5 E-Paper S3 Pro from your browser. No PlatformIO or command line required." />
+
+  <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
+
+  <style>
+    :root {
+      --bg: #f5f3ee;
+      --ink: #1e1c19;
+      --muted: #635e57;
+      --accent: #2a4d3a;
+      --accent-strong: #1c3527;
+      --border: #d8d2c4;
+      --card: #fffdf8;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      background: var(--bg);
+      color: var(--ink);
+      line-height: 1.55;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+    }
+
+    main {
+      max-width: 720px;
+      margin: 0 auto;
+      padding: 4rem 1.5rem 5rem;
+      flex: 1;
+    }
+
+    header {
+      text-align: center;
+      margin-bottom: 2.5rem;
+    }
+
+    .logo {
+      font-size: 2.75rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      margin: 0 0 0.5rem;
+      color: var(--accent-strong);
+    }
+
+    .tagline {
+      font-size: 1.1rem;
+      color: var(--muted);
+      margin: 0;
+    }
+
+    .card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 2rem;
+      margin-bottom: 1.5rem;
+      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
+    }
+
+    h2 {
+      margin: 0 0 1rem;
+      font-size: 1.3rem;
+      color: var(--accent-strong);
+    }
+
+    p { margin: 0 0 1rem; }
+
+    .install-row {
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      gap: 1rem;
+      padding: 1.5rem 0 0.5rem;
+    }
+
+    esp-web-install-button {
+      --esp-tools-button-color: #fff;
+      --esp-tools-button-text-color: var(--accent-strong);
+      --esp-tools-button-border-color: var(--accent);
+    }
+
+    .browser-warning {
+      font-size: 0.9rem;
+      color: var(--muted);
+      text-align: center;
+      max-width: 32rem;
+    }
+
+    ol, ul { padding-left: 1.25rem; }
+    li { margin-bottom: 0.4rem; }
+
+    code {
+      font-family: "SF Mono", Menlo, Consolas, monospace;
+      font-size: 0.92em;
+      background: rgba(42, 77, 58, 0.08);
+      padding: 0.1em 0.35em;
+      border-radius: 4px;
+    }
+
+    a { color: var(--accent); }
+    a:hover { color: var(--accent-strong); }
+
+    footer {
+      text-align: center;
+      padding: 2rem 1rem;
+      font-size: 0.85rem;
+      color: var(--muted);
+      border-top: 1px solid var(--border);
+    }
+
+    .badge {
+      display: inline-block;
+      font-size: 0.75rem;
+      font-weight: 600;
+      padding: 0.2em 0.6em;
+      border-radius: 999px;
+      background: var(--accent);
+      color: #fff;
+      vertical-align: middle;
+      margin-left: 0.5em;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #181614;
+        --ink: #ece8df;
+        --muted: #a39d92;
+        --accent: #7fb98c;
+        --accent-strong: #b8e4c1;
+        --border: #322e29;
+        --card: #211e1a;
+      }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <h1 class="logo">Paperloom</h1>
+      <p class="tagline">Browser-based firmware installer for your LilyGo e-reader.</p>
+    </header>
+
+    <section class="card">
+      <h2>Install firmware</h2>
+      <p>Connect your <strong>LilyGo T5 E-Paper S3 Pro</strong> (or Pro Lite) to this computer over USB-C, then click below.</p>
+
+      <div class="install-row">
+        <esp-web-install-button manifest="./manifest.json">
+          <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome, Edge, or Opera on desktop.</span>
+          <span slot="not-allowed">Web Serial is disabled. Open this page over HTTPS in a supported browser.</span>
+        </esp-web-install-button>
+        <p class="browser-warning">Requires Chrome, Edge, or Opera on desktop. Firefox and Safari are not supported.</p>
+      </div>
+    </section>
+
+    <section class="card">
+      <h2>How it works</h2>
+      <ol>
+        <li>Plug the e-reader into your computer with a USB-C cable.</li>
+        <li>Click <em>Connect</em> and select the device port (look for <code>USB JTAG/serial debug unit</code>).</li>
+        <li>Click <em>Install Paperloom</em> and wait for the flash to finish (~30–60 seconds).</li>
+        <li>The device reboots into Paperloom automatically.</li>
+      </ol>
+      <p>You only need this once. From then on, the device updates itself over WiFi via <em>Settings → Firmware Update</em>.</p>
+    </section>
+
+    <section class="card">
+      <h2>Troubleshooting</h2>
+      <ul>
+        <li><strong>No device shows up?</strong> Press the small <code>RST</code> button on the device while it's plugged in, then click Connect again.</li>
+        <li><strong>"Failed to initialize" error?</strong> Try a different USB-C cable — some cables are power-only.</li>
+        <li><strong>Linux:</strong> add yourself to the <code>dialout</code> group (<code>sudo usermod -aG dialout $USER</code>) and re-login.</li>
+        <li><strong>Manual flash:</strong> the firmware binaries are attached to every <a href="https://github.com/Lazybone/Paperloom/releases">GitHub release</a> if you prefer <code>esptool.py</code> or PlatformIO.</li>
+      </ul>
+    </section>
+  </main>
+
+  <footer>
+    Paperloom is open source under the MIT license · <a href="https://github.com/Lazybone/Paperloom">github.com/Lazybone/Paperloom</a>
+  </footer>
+</body>
+</html>

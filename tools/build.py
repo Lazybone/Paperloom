@@ -19,6 +19,8 @@ from __future__ import annotations
 
 import argparse
 import datetime as _dt
+import glob
+import json
 import os
 import re
 import shutil
@@ -31,8 +33,18 @@ CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 CONFIG_H = REPO_ROOT / "include" / "config.h"
 README = REPO_ROOT / "README.md"
 BUILD_DIR = REPO_ROOT / "build"
-PIO_BIN = REPO_ROOT / ".pio" / "build" / "gh_release" / "firmware.bin"
+MANIFEST = REPO_ROOT / "docs" / "manifest.json"
+PIO_BUILD_DIR = REPO_ROOT / ".pio" / "build" / "gh_release"
+PIO_BIN = PIO_BUILD_DIR / "firmware.bin"
+PIO_BOOTLOADER = PIO_BUILD_DIR / "bootloader.bin"
+PIO_PARTITIONS = PIO_BUILD_DIR / "partitions.bin"
 PIO_ENV = "gh_release"
+
+# ESP32-S3 standard flash offsets used by the Arduino framework.
+FLASH_OFFSET_BOOTLOADER = 0x0000
+FLASH_OFFSET_PARTITIONS = 0x8000
+FLASH_OFFSET_BOOT_APP0 = 0xE000
+FLASH_OFFSET_APP = 0x10000
 
 # Matches `#define FIRMWARE_VERSION "x.y.z"` regardless of inner whitespace.
 # The gh_release PlatformIO env overrides this via -D so the in-source value is
@@ -173,6 +185,108 @@ def copy_binary(out_paths: list[Path], dry_run: bool) -> None:
         shutil.copy2(PIO_BIN, out_path)
 
 
+def find_esptool() -> "list[str] | None":
+    """Return a command prefix that invokes esptool, or None if it cannot be located.
+
+    Search order: PATH (`esptool.py`, `esptool`), `python -m esptool`, the
+    PlatformIO bundled copy under ~/.platformio/packages/tool-esptoolpy.
+    """
+    for name in ("esptool.py", "esptool"):
+        path = shutil.which(name)
+        if path:
+            return [path]
+
+    if subprocess.run(
+        [sys.executable, "-m", "esptool", "--help"],
+        capture_output=True,
+    ).returncode == 0:
+        return [sys.executable, "-m", "esptool"]
+
+    matches = sorted(
+        glob.glob(str(Path.home() / ".platformio" / "packages" / "tool-esptoolpy" / "esptool.py"))
+    )
+    if matches:
+        return [sys.executable, matches[0]]
+
+    return None
+
+
+def find_boot_app0() -> "Path | None":
+    """Locate boot_app0.bin from the installed Arduino-ESP32 framework."""
+    pattern = str(
+        Path.home() / ".platformio" / "packages" / "framework-arduinoespressif32"
+        / "tools" / "partitions" / "boot_app0.bin"
+    )
+    matches = sorted(glob.glob(pattern))
+    return Path(matches[0]) if matches else None
+
+
+def build_merged_binary(out_path: Path, dry_run: bool) -> bool:
+    """Produce a single flashable image suitable for esp-web-tools (offset 0x0).
+
+    Combines bootloader, partition table, OTA-data init, and the application
+    into one file. Returns True on success, False if a prerequisite is missing
+    (caller decides whether that is fatal).
+    """
+    esptool_cmd = find_esptool()
+    if esptool_cmd is None:
+        print("-> merged image: skipped (esptool not found — install with `pip install esptool`)")
+        return False
+
+    boot_app0 = find_boot_app0()
+    if boot_app0 is None:
+        print("-> merged image: skipped (boot_app0.bin not found under ~/.platformio/packages)")
+        return False
+
+    for required in (PIO_BOOTLOADER, PIO_PARTITIONS, PIO_BIN):
+        if not required.is_file() and not dry_run:
+            print(f"-> merged image: skipped ({required.name} missing — was the build successful?)")
+            return False
+
+    cmd = [
+        *esptool_cmd,
+        "--chip", "esp32s3",
+        "merge_bin",
+        "--output", str(out_path),
+        "--flash_mode", "dio",
+        "--flash_freq", "80m",
+        "--flash_size", "16MB",
+        f"0x{FLASH_OFFSET_BOOTLOADER:x}", str(PIO_BOOTLOADER),
+        f"0x{FLASH_OFFSET_PARTITIONS:x}", str(PIO_PARTITIONS),
+        f"0x{FLASH_OFFSET_BOOT_APP0:x}", str(boot_app0),
+        f"0x{FLASH_OFFSET_APP:x}", str(PIO_BIN),
+    ]
+
+    print(f"-> merged image:   {out_path.relative_to(REPO_ROOT)}  (esptool merge_bin)")
+    if dry_run:
+        return True
+
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    result = subprocess.run(cmd, cwd=REPO_ROOT)
+    if result.returncode != 0:
+        fail(f"`esptool merge_bin` exited with status {result.returncode}")
+    return True
+
+
+def bump_manifest_version(version: str, dry_run: bool) -> None:
+    """Update the version field of docs/manifest.json (web-installer)."""
+    if not MANIFEST.is_file():
+        print(f"-> {MANIFEST.relative_to(REPO_ROOT)}: missing, skipping")
+        return
+
+    data = json.loads(MANIFEST.read_text(encoding="utf-8"))
+    if data.get("version") == version:
+        print(f"-> {MANIFEST.relative_to(REPO_ROOT)}: already at {version}")
+        return
+
+    data["version"] = version
+    print(f"-> {MANIFEST.relative_to(REPO_ROOT)}: version -> {version}")
+    if dry_run:
+        return
+
+    MANIFEST.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
+
+
 def publish_github_release(
     version: str,
     bin_paths: list[Path],
@@ -266,11 +380,14 @@ def main() -> int:
     if not CHANGELOG.is_file():
         fail(f"missing {CHANGELOG}")
 
-    # Two binary copies:
-    #   <Product>-<version>.bin  — friendly download name shown on the release page
-    #   firmware.bin             — exact asset name the on-device OTA checker expects
+    # Three binary copies on the release:
+    #   <Product>-<version>.bin    — friendly download name shown on the release page
+    #   firmware.bin               — exact asset name the on-device OTA checker expects
+    #   Paperloom-merged.bin       — single-file image consumed by the web installer
+    #                                (docs/manifest.json → esp-web-tools).
     out_bin = BUILD_DIR / f"{args.product}-{args.version}.bin"
     out_ota = BUILD_DIR / "firmware.bin"
+    out_merged = BUILD_DIR / "Paperloom-merged.bin"
     out_notes = BUILD_DIR / f"release_notes_{args.version}.md"
 
     # We need the Unreleased body for the release notes even when --skip-changelog
@@ -280,11 +397,13 @@ def main() -> int:
     if not args.skip_version_bump:
         bump_config_version(args.version, args.dry_run)
         bump_readme_version(args.version, args.dry_run)
+        bump_manifest_version(args.version, args.dry_run)
 
     if not args.skip_build:
         build_firmware(args.version, args.dry_run)
 
     copy_binary([out_bin, out_ota], args.dry_run)
+    merged_ok = build_merged_binary(out_merged, args.dry_run)
 
     body_for_notes = unreleased_body
     if not args.skip_changelog:
@@ -292,10 +411,14 @@ def main() -> int:
 
     write_release_notes(out_notes, args.version, args.date, body_for_notes, args.dry_run)
 
+    release_assets = [out_bin, out_ota]
+    if merged_ok:
+        release_assets.append(out_merged)
+
     if args.publish:
         publish_github_release(
             args.version,
-            [out_bin, out_ota],
+            release_assets,
             out_notes,
             args.repo,
             args.draft,
@@ -303,19 +426,19 @@ def main() -> int:
         )
 
     print()
+    asset_names = ", ".join(f"`{p.name}`" for p in release_assets)
     if args.publish:
         kind = "draft release" if args.draft else "release"
-        print(f"done.  GitHub {kind} v{args.version} created with "
-              f"`{out_bin.name}` + `{out_ota.name}` attached.")
-        print(f"       Make sure the version-bump commit (config.h, README.md, CHANGELOG.md) is "
-              f"pushed so the tag points at the right SHA.")
+        print(f"done.  GitHub {kind} v{args.version} created with {asset_names} attached.")
+        print(f"       Make sure the version-bump commit (config.h, README.md, CHANGELOG.md, "
+              f"docs/manifest.json) is pushed so the tag points at the right SHA.")
     else:
-        print(f"done.  Upload BOTH `{out_bin.relative_to(REPO_ROOT)}` and "
-              f"`{out_ota.relative_to(REPO_ROOT)}` to the GitHub release.")
-        print(f"       firmware.bin is the asset the on-device OTA checker looks for.")
+        rel_assets = " ".join(str(p.relative_to(REPO_ROOT)) for p in release_assets)
+        print(f"done.  Upload {asset_names} to the GitHub release.")
+        print(f"       firmware.bin is what the on-device OTA checker fetches.")
+        print(f"       Paperloom-merged.bin is what the docs/ web installer fetches.")
         print(f"       Body: `{out_notes.relative_to(REPO_ROOT)}`.")
-        print(f"       e.g.  gh release create v{args.version} "
-              f"{out_bin.relative_to(REPO_ROOT)} {out_ota.relative_to(REPO_ROOT)} "
+        print(f"       e.g.  gh release create v{args.version} {rel_assets} "
               f"-F {out_notes.relative_to(REPO_ROOT)} -t \"v{args.version}\"")
         print(f"       Or rerun with --publish to do it automatically.")
     return 0
