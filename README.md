@@ -11,7 +11,7 @@ EPUB reader firmware optimised for two LilyGo boards sharing the same ESP32-S3 +
 
 Portrait UI, SD-backed library, on-device WiFi setup with on-screen keyboard, browser-based file manager (**Paperloom**), OTA updates pinned to GitHub releases, sleep-image gallery.
 
-Version: **v0.2.0** · PlatformIO env: `default`
+Version: **v0.2.1** · PlatformIO env: `default`
 
 ---
 
@@ -216,7 +216,7 @@ JPEG / JPG inline images render via an SD-backed pre-rendered raw4 cache (no liv
 
 **Settings → Firmware Update** → WiFi connects → fetches latest GitHub release JSON → version compare → installs the `firmware.bin` asset if newer → reboot.
 
-Release side: tag `vX.Y.Z` triggers GitHub Actions to build env `gh_release` and upload `.pio/build/gh_release/firmware.bin`. The on-device checker expects that exact filename.
+Release side: run `python3 tools/build.py X.Y.Z` to build env `gh_release`, then attach `.pio/build/gh_release/firmware.bin` to the GitHub release. The on-device checker expects that exact filename.
 
 If OTA finds nothing: verify WiFi credentials, that a newer release tag exists, and that the release contains a `firmware.bin` asset.
 

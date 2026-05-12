@@ -26,7 +26,7 @@ static bool isAllowedDownloadUrl(const String& url) {
 
 // DigiCert Global Root CA — GitHub's TLS chain anchor as of writing. This
 // is a long-lived root (expires 2031-11-10). When it rotates, update here
-// AND in any CI-side verification.
+// when creating a new release.
 //
 // NOT marked PROGMEM: WiFiClientSecure::setCACert() stores the raw pointer
 // without copying, and we want unambiguous RAM/flash addressability across

@@ -69,4 +69,4 @@ First release of the T5S3 PRO-only firmware fork.
 - Single PlatformIO environment: `default`
 - `gh_release` env extends `default` and injects `FIRMWARE_VERSION` from `RELEASE_TAG`
 - `tools/patch_epdiy.py` PlatformIO pre-script patches `vroland/epdiy@2.0.0` so its `epd_board_v7::epd_board_init` tolerates an already-installed I²C driver and skips `i2c_param_config`
-- CI builds on push/PR; tag pushes (`v*`) publish `firmware.bin` to the release
+- Release builds via `tools/build.py`; manual `gh release create` for publishing
