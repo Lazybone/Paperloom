@@ -43,7 +43,7 @@ static void raw4_accumulate(int sx, int sy, uint8_t gray4) {
     if (!ctx || !ctx->pixels || ctx->srcW <= 0 || ctx->srcH <= 0) return;
     int dx = (sx * ctx->dstW) / ctx->srcW;
     int dy = (sy * ctx->dstH) / ctx->srcH;
-    if (dx < 0 || dy < 0 || dx >= ctx->dstW || dy < 0 || dy >= ctx->dstH) return;
+    if (dx < 0 || dy < 0 || dx >= ctx->dstW || dy >= ctx->dstH) return;
     ctx->pixels[(size_t)dy * ctx->dstW + dx] = gray4 & 0x0F;
 }
 
