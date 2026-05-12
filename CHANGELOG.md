@@ -4,6 +4,21 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+- OTA update check no longer fails silently after GitHub rotated its CA
+  chain. `api.github.com` now serves through Sectigo / USERTrust ECC and
+  the release CDN through Let's Encrypt / ISRG Root X1; the firmware
+  previously pinned only DigiCert Global Root CA, so both TLS handshakes
+  failed and the UI rendered the failure as "Up to date (v0.2.0)".
+  Trust bundle now ships USERTrust ECC + ISRG Root X1 + DigiCert as a
+  fallback, so OTA detects new releases again.
+
+### Security
+- `SECURITY.md`: OTA hardening note rewritten to describe the multi-root
+  trust bundle and the post-redirect host whitelist.
+
+## v0.2.1 — 2026-05-12
+
 ### Added
 - BOOT button (GPIO 0) gestures are now configurable from Settings -> Buttons.
   Tap / double-tap / hold each map to a `ButtonAction` (None, Light toggle,
