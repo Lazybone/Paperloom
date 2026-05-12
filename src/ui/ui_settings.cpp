@@ -25,6 +25,137 @@ static constexpr int PAGE_BUTTONS = 3;  // Submenu reached from Device
 
 static int settingsPage = PAGE_READING;
 
+// Generic picker overlay. Used for button-action selection (per gesture),
+// brightness level, and font family.  Only one picker is active at a time.
+enum PickerKind {
+    PICKER_NONE = 0,
+    PICKER_BUTTON_ACTION,
+    PICKER_BRIGHTNESS,
+    PICKER_FONT_FAMILY,
+};
+
+static PickerKind pickerKind   = PICKER_NONE;
+static int        pickerTarget = -1;  // PICKER_BUTTON_ACTION: 0..5 → buttonPickerSlot()
+
+static const int BRIGHTNESS_STEP_COUNT = 11;  // 0%, 10%, …, 100%
+
+static uint8_t* buttonPickerSlot(Settings& s, int target) {
+    switch (target) {
+        case 0: return &s.userButtonTapAction;
+        case 1: return &s.userButtonDoubleAction;
+        case 2: return &s.userButtonLongAction;
+        case 3: return &s.bootButtonTapAction;
+        case 4: return &s.bootButtonDoubleAction;
+        case 5: return &s.bootButtonLongAction;
+        default: return nullptr;
+    }
+}
+
+static const char* buttonPickerTitle(int target) {
+    switch (target) {
+        case 0: return "IO48 Tap";
+        case 1: return "IO48 Double";
+        case 2: return "IO48 Hold";
+        case 3: return "Boot Tap";
+        case 4: return "Boot Double";
+        case 5: return "Boot Hold";
+        default: return "Action";
+    }
+}
+
+static int pickerItemCount() {
+    switch (pickerKind) {
+        case PICKER_BUTTON_ACTION: return BTN_ACTION_COUNT;
+        case PICKER_BRIGHTNESS:    return BRIGHTNESS_STEP_COUNT;
+        case PICKER_FONT_FAMILY:   return FONT_FAMILY_COUNT;
+        default:                   return 0;
+    }
+}
+
+static const char* pickerItemLabel(int i, char* buf, size_t n) {
+    switch (pickerKind) {
+        case PICKER_BUTTON_ACTION:
+            return button_action_name((uint8_t)i);
+        case PICKER_BRIGHTNESS:
+            snprintf(buf, n, "%d%%", i * 10);
+            return buf;
+        case PICKER_FONT_FAMILY:
+            return (i >= 0 && i < FONT_FAMILY_COUNT) ? kFontFamilyNames[i] : "?";
+        default:
+            return "";
+    }
+}
+
+static int pickerCurrentIndex(Settings& s) {
+    switch (pickerKind) {
+        case PICKER_BUTTON_ACTION: {
+            uint8_t* slot = buttonPickerSlot(s, pickerTarget);
+            return slot ? *slot : 0;
+        }
+        case PICKER_BRIGHTNESS: {
+            int idx = (s.frontlightBrightness + 5) / 10;
+            if (idx < 0) idx = 0;
+            if (idx >= BRIGHTNESS_STEP_COUNT) idx = BRIGHTNESS_STEP_COUNT - 1;
+            return idx;
+        }
+        case PICKER_FONT_FAMILY:
+            return (s.fontFamily < FONT_FAMILY_COUNT) ? s.fontFamily : 0;
+        default:
+            return -1;
+    }
+}
+
+static const char* pickerHeader(char* buf, size_t n) {
+    switch (pickerKind) {
+        case PICKER_BUTTON_ACTION:
+            snprintf(buf, n, "Action: %s", buttonPickerTitle(pickerTarget));
+            return buf;
+        case PICKER_BRIGHTNESS:  return "Brightness";
+        case PICKER_FONT_FAMILY: return "Font Family";
+        default:                 return "";
+    }
+}
+
+static void pickerApply(Settings& s, int idx) {
+    switch (pickerKind) {
+        case PICKER_BUTTON_ACTION: {
+            uint8_t* slot = buttonPickerSlot(s, pickerTarget);
+            if (slot) *slot = (uint8_t)idx;
+            break;
+        }
+        case PICKER_BRIGHTNESS: {
+            int v = idx * 10;
+            if (v < 0) v = 0;
+            if (v > 100) v = 100;
+            s.frontlightBrightness = (uint8_t)v;
+            frontlight_apply_from_settings();
+            break;
+        }
+        case PICKER_FONT_FAMILY:
+            if (idx >= 0 && idx < FONT_FAMILY_COUNT) {
+                s.fontFamily = (uint8_t)idx;
+                display_set_font(s.fontSizeLevel, s.fontFamily);
+            }
+            break;
+        default:
+            break;
+    }
+}
+
+static void pickerClose() {
+    pickerKind   = PICKER_NONE;
+    pickerTarget = -1;
+}
+
+// Persist settings immediately after a user-visible change.  Failures are
+// logged but non-fatal — the in-RAM state still reflects the new value
+// and the on-back save in the footer handler is a second chance.
+static void saveSettingsNow() {
+    if (!settings_save()) {
+        Serial.println("Settings: immediate save failed");
+    }
+}
+
 // ─── Settings option arrays ─────────────────────────────────────────
 static const char* fontSizeNames[] = {"XS", "S", "M", "M-L", "L"};
 static_assert(sizeof(fontSizeNames) / sizeof(fontSizeNames[0]) == FONT_SIZE_LEVEL_COUNT,
@@ -72,7 +203,7 @@ static int rowCountForPage(int page) {
         case PAGE_READING: return 7;
         case PAGE_LIBRARY: return 3;
         case PAGE_DEVICE:  return 8;
-        case PAGE_BUTTONS: return 4;
+        case PAGE_BUTTONS: return 8;
         default:           return 0;
     }
 }
@@ -110,6 +241,37 @@ static void drawRow(int y, const char* label, const char* value) {
 
 void ui_settings_draw(bool& settingsFromLibrary) {
     display_set_font_size(2);  // chrome always in Inter
+
+    // Picker overlay (button action / brightness / font family) short-
+    // circuits the regular settings draw.
+    if (pickerKind != PICKER_NONE) {
+        display_fill_screen(15);
+        char hdrBuf[48];
+        drawHeader(pickerHeader(hdrBuf, sizeof(hdrBuf)));
+
+        Settings& s = settings_get();
+        int current = pickerCurrentIndex(s);
+        int count   = pickerItemCount();
+
+        int yy = HEADER_HEIGHT + MARGIN_Y + 10;
+        for (int i = 0; i < count; i++) {
+            char nameBuf[24];
+            const char* name = pickerItemLabel(i, nameBuf, sizeof(nameBuf));
+            // Highlight current selection with a marker on the left.
+            const char* marker = (i == current) ? "> " : "  ";
+            char line[48];
+            snprintf(line, sizeof(line), "%s%s", marker, name);
+            display_draw_text(MARGIN_X, yy + FONT_H - 4, line, 0);
+            display_draw_hline(MARGIN_X, yy + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
+            yy += SETTINGS_ROW_H;
+        }
+
+        drawBottomBar("[ Cancel ]");
+        display_update_medium();
+        settingsFromLibrary = false;
+        return;
+    }
+
     display_fill_screen(15);
     drawHeader(pageTitle(settingsPage));
 
@@ -221,29 +383,54 @@ void ui_settings_draw(bool& settingsFromLibrary) {
         drawRow(y, "Firmware Update", "[ Check ]");
         y += SETTINGS_ROW_H;
     } else if (settingsPage == PAGE_BUTTONS) {
+        // Boot Button enable
+        drawRow(y, "Boot Button", s.bootButtonEnabled ? "[ ON ]" : "[ OFF ]");
+        y += SETTINGS_ROW_H;
+
+        // Boot Tap action
+        char bootTapLabel[32];
+        snprintf(bootTapLabel, sizeof(bootTapLabel), "< %s >",
+                 button_action_name(s.bootButtonTapAction));
+        drawRow(y, "Boot Tap", bootTapLabel);
+        y += SETTINGS_ROW_H;
+
+        // Boot Double-tap action
+        char bootDblLabel[32];
+        snprintf(bootDblLabel, sizeof(bootDblLabel), "< %s >",
+                 button_action_name(s.bootButtonDoubleAction));
+        drawRow(y, "Boot Double", bootDblLabel);
+        y += SETTINGS_ROW_H;
+
+        // Boot Long-press action
+        char bootLngLabel[32];
+        snprintf(bootLngLabel, sizeof(bootLngLabel), "< %s >",
+                 button_action_name(s.bootButtonLongAction));
+        drawRow(y, "Boot Hold", bootLngLabel);
+        y += SETTINGS_ROW_H;
+
         // User Button enable
-        drawRow(y, "User Button", s.userButtonEnabled ? "[ ON ]" : "[ OFF ]");
+        drawRow(y, "IO48 Button", s.userButtonEnabled ? "[ ON ]" : "[ OFF ]");
         y += SETTINGS_ROW_H;
 
         // Tap action
         char btnTapLabel[32];
         snprintf(btnTapLabel, sizeof(btnTapLabel), "< %s >",
                  button_action_name(s.userButtonTapAction));
-        drawRow(y, "Tap", btnTapLabel);
+        drawRow(y, "IO48 Tap", btnTapLabel);
         y += SETTINGS_ROW_H;
 
         // Double-tap action
         char btnDblLabel[32];
         snprintf(btnDblLabel, sizeof(btnDblLabel), "< %s >",
                  button_action_name(s.userButtonDoubleAction));
-        drawRow(y, "Double Tap", btnDblLabel);
+        drawRow(y, "IO48 Double", btnDblLabel);
         y += SETTINGS_ROW_H;
 
         // Long-press action
         char btnLngLabel[32];
         snprintf(btnLngLabel, sizeof(btnLngLabel), "< %s >",
                  button_action_name(s.userButtonLongAction));
-        drawRow(y, "Hold", btnLngLabel);
+        drawRow(y, "IO48 Hold", btnLngLabel);
         y += SETTINGS_ROW_H;
     }
 
@@ -261,6 +448,24 @@ void ui_settings_draw(bool& settingsFromLibrary) {
 // ═══════════════════════════════════════════════════════════════════
 
 AppState ui_settings_touch(int x, int y, BookReader& reader) {
+    // Picker overlay handles its own hit-testing.
+    if (pickerKind != PICKER_NONE) {
+        // Footer → cancel (no change).
+        if (y > H - FOOTER_HEIGHT) {
+            pickerClose();
+            return STATE_SETTINGS;
+        }
+        int rowY = HEADER_HEIGHT + MARGIN_Y + 10;
+        int row  = (y - rowY) / SETTINGS_ROW_H;
+        if (row >= 0 && row < pickerItemCount()) {
+            Settings& s = settings_get();
+            pickerApply(s, row);
+            pickerClose();
+            saveSettingsNow();
+        }
+        return STATE_SETTINGS;
+    }
+
     // Footer → back
     if (y > H - FOOTER_HEIGHT) {
         // Buttons submenu: back goes to Device page, stay in settings
@@ -309,6 +514,12 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
     int rowCount = rowCountForPage(settingsPage);
 
     if (row >= 0 && row < rowCount) {
+        // Track whether this tap actually mutated Settings so we only
+        // pay the SD+NVS write cost when there is something new to save.
+        // Opening a picker overlay, navigating to a submenu, or tapping a
+        // display-only row leaves this false.
+        bool mutated = false;
+
         if (settingsPage == PAGE_READING) {
             switch (row) {
                 case 0: // Font Size
@@ -318,14 +529,12 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                         s.fontSizeLevel = (s.fontSizeLevel + FONT_SIZE_LEVEL_COUNT - 1) % FONT_SIZE_LEVEL_COUNT;
                     }
                     display_set_font(s.fontSizeLevel, s.fontFamily);
+                    mutated = true;
                     break;
-                case 1: // Font Family — cycle Sans → Serif → Slab → Sans …
-                    if (rightSide) {
-                        s.fontFamily = (uint8_t)((s.fontFamily + 1) % FONT_FAMILY_COUNT);
-                    } else {
-                        s.fontFamily = (uint8_t)((s.fontFamily + FONT_FAMILY_COUNT - 1) % FONT_FAMILY_COUNT);
-                    }
-                    display_set_font(s.fontSizeLevel, s.fontFamily);
+                case 1: // Font Family — open picker overlay
+                    pickerKind   = PICKER_FONT_FAMILY;
+                    pickerTarget = -1;
+                    (void)rightSide;
                     break;
                 case 2: // Line spacing
                     if (rightSide) {
@@ -333,6 +542,7 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                     } else {
                         s.lineSpacingLevel = (s.lineSpacingLevel + LINE_SPACING_LEVEL_COUNT - 1) % LINE_SPACING_LEVEL_COUNT;
                     }
+                    mutated = true;
                     break;
                 case 3: // Font preview — no action
                     break;
@@ -344,6 +554,7 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                         idx = (idx + NUM_SLEEP_OPTIONS - 1) % NUM_SLEEP_OPTIONS;
                     }
                     s.sleepTimeoutMin = sleepOptions[idx];
+                    mutated = true;
                     break;
                 }
                 case 5: { // Cleanup Refresh
@@ -354,10 +565,12 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                         idx = (idx + NUM_REFRESH_OPTIONS - 1) % NUM_REFRESH_OPTIONS;
                     }
                     s.refreshEveryPages = refreshOptions[idx];
+                    mutated = true;
                     break;
                 }
                 case 6: // Page Numbers
                     s.showPageNumbers = !s.showPageNumbers;
+                    mutated = true;
                     break;
             }
         } else if (settingsPage == PAGE_LIBRARY) {
@@ -368,6 +581,7 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                         s.posterShowCovers = true;
                     }
                     cover_cache_clear();
+                    mutated = true;
                     break;
                 case 1: // Library Sort
                     if (rightSide) {
@@ -375,32 +589,29 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                     } else {
                         s.librarySortOrder = (s.librarySortOrder + 3) % 4;
                     }
+                    mutated = true;
                     break;
                 case 2: // Poster Covers
                     s.posterShowCovers = !s.posterShowCovers;
                     cover_cache_clear();
+                    mutated = true;
                     break;
             }
         } else if (settingsPage == PAGE_DEVICE) {
             switch (row) {
                 case 0: // Battery Display
                     s.showBattery = !s.showBattery;
+                    mutated = true;
                     break;
                 case 1: // Frontlight on/off
                     s.frontlightEnabled = !s.frontlightEnabled;
                     frontlight_apply_from_settings();
+                    mutated = true;
                     break;
-                case 2: { // Brightness
-                    int b = s.frontlightBrightness;
-                    if (rightSide) {
-                        b += 10; if (b > 100) b = 100;
-                    } else {
-                        b -= 10; if (b < 0) b = 0;
-                    }
-                    s.frontlightBrightness = (uint8_t)b;
-                    frontlight_apply_from_settings();
+                case 2: // Brightness — open picker overlay
+                    pickerKind   = PICKER_BRIGHTNESS;
+                    pickerTarget = -1;
                     break;
-                }
                 case 3: // Button Setup → submenu
                     settingsPage = PAGE_BUTTONS;
                     return STATE_SETTINGS;
@@ -414,33 +625,35 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                     return STATE_OTA_CHECK;
             }
         } else if (settingsPage == PAGE_BUTTONS) {
-            switch (row) {
-                case 0: // User Button enable
-                    s.userButtonEnabled = !s.userButtonEnabled;
-                    break;
-                case 1: { // Tap action
-                    int v = s.userButtonTapAction;
-                    v = rightSide ? (v + 1) % BTN_ACTION_COUNT
-                                  : (v + BTN_ACTION_COUNT - 1) % BTN_ACTION_COUNT;
-                    s.userButtonTapAction = (uint8_t)v;
-                    break;
-                }
-                case 2: { // Double-tap action
-                    int v = s.userButtonDoubleAction;
-                    v = rightSide ? (v + 1) % BTN_ACTION_COUNT
-                                  : (v + BTN_ACTION_COUNT - 1) % BTN_ACTION_COUNT;
-                    s.userButtonDoubleAction = (uint8_t)v;
-                    break;
-                }
-                case 3: { // Hold action
-                    int v = s.userButtonLongAction;
-                    v = rightSide ? (v + 1) % BTN_ACTION_COUNT
-                                  : (v + BTN_ACTION_COUNT - 1) % BTN_ACTION_COUNT;
-                    s.userButtonLongAction = (uint8_t)v;
-                    break;
+            // Action rows open a picker overlay instead of cycling.  Index
+            // matches the order returned by buttonPickerSlot().
+            static const int kPickerRowToTarget[8] = {
+                -1,  // 0: Boot Button enable (toggle)
+                 3,  // 1: Boot Tap
+                 4,  // 2: Boot Double
+                 5,  // 3: Boot Hold
+                -1,  // 4: User Button enable (toggle)
+                 0,  // 5: IO48 Tap
+                 1,  // 6: IO48 Double
+                 2,  // 7: IO48 Hold
+            };
+            (void)rightSide;
+            if (row == 0) {
+                s.bootButtonEnabled = !s.bootButtonEnabled;
+                mutated = true;
+            } else if (row == 4) {
+                s.userButtonEnabled = !s.userButtonEnabled;
+                mutated = true;
+            } else {
+                int target = kPickerRowToTarget[row];
+                if (target >= 0) {
+                    pickerKind   = PICKER_BUTTON_ACTION;
+                    pickerTarget = target;
                 }
             }
         }
+
+        if (mutated) saveSettingsNow();
         return STATE_SETTINGS;
     }
 

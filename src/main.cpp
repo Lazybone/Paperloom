@@ -70,14 +70,17 @@ static unsigned long touchDownTime = 0;
 static bool touchHandled = false;
 static const unsigned long LONG_PRESS_MS = 800;
 
-// ─── Bedien-Button: single=next, double=prev, long=sleep ──────────
-// BOOT-Button auf GPIO 0 (BUTTON_PIN aus config.h).
+// ─── Bedien-Button: konfigurierbar über Settings (bootButton*) ────
+// BOOT-Button auf GPIO 0 (BUTTON_PIN aus config.h). Tap/Double/Long
+// werden via button_action_execute() dispatched. Long-Press fällt auf
+// BTN_ACTION_SLEEP zurück, wenn bootButtonEnabled=false (Fail-Safe).
 // Die PCA9535-basierten User-Tasten werden separat via PCA9535-IO12
 // abgefragt (siehe USER_BUTTON_VIA_PCA9535 weiter unten).
 static unsigned long btnDownTime = 0;
 static bool btnWasPressed = false;
 static unsigned long lastBtnReleaseTime = 0;
 static int btnPressCount = 0;
+static bool btnLongFired = false;  // suppress tap-count after long fires
 static const unsigned long BUTTON_DEBOUNCE_MS = 50;
 static const unsigned long BUTTON_POWER_MS = 600;   // hold 600ms to sleep
 // 250 ms is enough to register an intentional double-tap on a physical
@@ -1100,42 +1103,57 @@ void loop() {
         }
     }
 
-    // Poll top button (GPIO 21): single=next page, double=prev page, hold=sleep — active LOW
-    bool btnPressed = (digitalRead(BUTTON_PIN) == LOW);
-    if (btnPressed && !btnWasPressed) {
-        // Fresh press
-        btnDownTime = millis();
-        lastTouchOrButtonTime = millis();
-    } else if (btnPressed && btnWasPressed) {
-        // Still held — check for long-press sleep trigger
-        unsigned long heldMs = millis() - btnDownTime;
-        // Only allow sleep after wake cooldown expires
-        if (heldMs >= BUTTON_POWER_MS && millis() >= wakeCooldownEnd) {
-            Serial.println("Top button long-press — entering deep sleep");
-            btnPressCount = 0;  // clear any queued presses
-            enterDeepSleep(true);
+    // Poll boot button (GPIO 0): gesture mapping via settings (bootButton*).
+    // Long-press always sleeps when disabled — fail-safe so the device can
+    // always be powered down without going through the UI.
+    {
+        const Settings& sBtn = settings_get();
+        bool btnPressed = (digitalRead(BUTTON_PIN) == LOW);
+        if (btnPressed && !btnWasPressed) {
+            // Fresh press
+            btnDownTime = millis();
+            btnLongFired = false;
+            lastTouchOrButtonTime = millis();
+        } else if (btnPressed && btnWasPressed) {
+            // Still held — check for long-press trigger
+            unsigned long heldMs = millis() - btnDownTime;
+            if (!btnLongFired && heldMs >= BUTTON_POWER_MS &&
+                millis() >= wakeCooldownEnd) {
+                btnLongFired = true;
+                btnPressCount = 0;
+                uint8_t act = sBtn.bootButtonEnabled
+                              ? sBtn.bootButtonLongAction
+                              : (uint8_t)BTN_ACTION_SLEEP;
+                Serial.printf("Boot button long-press — action=%u\n", (unsigned)act);
+                button_action_execute(act);
+            }
+        } else if (!btnPressed && btnWasPressed) {
+            // Released — only count as tap if it wasn't a long-press
+            unsigned long heldMs = millis() - btnDownTime;
+            if (!btnLongFired &&
+                heldMs >= BUTTON_DEBOUNCE_MS && heldMs < BUTTON_POWER_MS) {
+                btnPressCount++;
+                lastBtnReleaseTime = millis();
+            }
         }
-    } else if (!btnPressed && btnWasPressed) {
-        // Released — only count as tap if it wasn't a long-press
-        unsigned long heldMs = millis() - btnDownTime;
-        if (heldMs >= BUTTON_DEBOUNCE_MS && heldMs < BUTTON_POWER_MS) {
-            btnPressCount++;
-            lastBtnReleaseTime = millis();
-        }
-    }
-    btnWasPressed = btnPressed;
+        btnWasPressed = btnPressed;
 
-    // Resolve single vs double press after the window expires
-    if (btnPressCount > 0 && !btnPressed &&
-        (millis() - lastBtnReleaseTime >= DOUBLE_PRESS_WINDOW_MS)) {
-        if (btnPressCount >= 2) {
-            Serial.println("Top button double-press — previous page");
-            buttonPageBackward();
-        } else {
-            Serial.println("Top button single-press — next page");
-            buttonPageForward();
+        // Resolve single vs double press after the window expires.
+        // Tap/double only fire when the button is enabled — long-press is
+        // handled above as a fail-safe regardless.
+        if (btnPressCount > 0 && !btnPressed &&
+            (millis() - lastBtnReleaseTime >= DOUBLE_PRESS_WINDOW_MS)) {
+            if (sBtn.bootButtonEnabled) {
+                if (btnPressCount >= 2) {
+                    Serial.println("Boot button double-press");
+                    button_action_execute(sBtn.bootButtonDoubleAction);
+                } else {
+                    Serial.println("Boot button single-press");
+                    button_action_execute(sBtn.bootButtonTapAction);
+                }
+            }
+            btnPressCount = 0;
         }
-        btnPressCount = 0;
     }
 
 #ifdef USER_BUTTON_VIA_PCA9535

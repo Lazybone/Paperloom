@@ -4,10 +4,21 @@
 #include "button_action.h"
 #include <SD.h>
 #include <ArduinoJson.h>
+#include <Preferences.h>
 
 static Settings _settings;
-static const char* SETTINGS_PATH = "/books/.settings.json";
-static const char* SETTINGS_TMP  = "/books/.settings.tmp";
+static const char* SETTINGS_PATH     = "/.settings.json";
+static const char* SETTINGS_TMP      = "/.settings.tmp";
+// Legacy path before the move to SD root.  Read once and migrated to the
+// new location on the next save.
+static const char* SETTINGS_PATH_OLD = "/books/.settings.json";
+
+// NVS namespace + key for the settings-mirror. Namespace is distinct from
+// the "ereader" namespace (used for sleep/reader state) so a NVS erase
+// scoped to one of them does not nuke the other. Namespace fits the
+// 15-char NVS limit.
+static const char* NVS_NS  = "ereader_set";
+static const char* NVS_KEY = "json";
 
 // Bump on any breaking schema change (renamed field, removed default,
 // changed semantic of an existing field). Read by settings_init() so a
@@ -40,46 +51,88 @@ void settings_set_default() {
     _settings.userButtonTapAction    = 1;  // sensible default once enabled
     _settings.userButtonDoubleAction = 2;
     _settings.userButtonLongAction   = 3;
+    // Boot button defaults preserve historical hardcoded behaviour
+    // (next/prev/sleep) so an OTA update doesn't change the feel of the
+    // device for existing users.
+    _settings.bootButtonEnabled      = true;
+    _settings.bootButtonTapAction    = BTN_ACTION_NEXT_PAGE;
+    _settings.bootButtonDoubleAction = BTN_ACTION_PREV_PAGE;
+    _settings.bootButtonLongAction   = BTN_ACTION_SLEEP;
 }
 
-void settings_init() {
-    settings_set_default();
-
-    File f = SD.open(SETTINGS_PATH, FILE_READ);
-    if (!f) {
-        Serial.println("Settings: no file found, using defaults");
-        if (!settings_save()) Serial.println("Settings: initial save failed");
-        return;
+// Read the whole settings file from SD into a String. Returns empty
+// String on missing-file / IO failure. Separated from parsing so the
+// NVS fallback path can reuse the same apply logic.
+static String read_text_file(const char* path) {
+    File f = SD.open(path, FILE_READ);
+    if (!f) return String();
+    String out;
+    out.reserve((size_t)f.size() + 1);
+    while (f.available()) {
+        out += (char)f.read();
     }
-
-    StaticJsonDocument<1024> doc;
-    DeserializationError err = deserializeJson(doc, f);
     f.close();
+    return out;
+}
 
+static String load_settings_text_from_sd(bool& fromLegacy) {
+    fromLegacy = false;
+    String out = read_text_file(SETTINGS_PATH);
+    if (out.length() > 0) return out;
+    // Fall back to the legacy /books location so users upgrading from an
+    // older firmware don't lose their settings on first boot.
+    out = read_text_file(SETTINGS_PATH_OLD);
+    if (out.length() > 0) {
+        fromLegacy = true;
+        Serial.println("Settings: found legacy /books/.settings.json — migrating to SD root");
+    }
+    return out;
+}
+
+static bool load_settings_text_from_nvs(String& out) {
+    Preferences prefs;
+    if (!prefs.begin(NVS_NS, true)) return false;
+    if (!prefs.isKey(NVS_KEY)) {
+        prefs.end();
+        return false;
+    }
+    out = prefs.getString(NVS_KEY, "");
+    prefs.end();
+    return out.length() > 0;
+}
+
+static bool save_settings_text_to_nvs(const String& json) {
+    Preferences prefs;
+    if (!prefs.begin(NVS_NS, false)) return false;
+    size_t written = prefs.putString(NVS_KEY, json);
+    prefs.end();
+    return written > 0;
+}
+
+// Parse a JSON blob and apply it to _settings.  Returns true on success.
+// On schema-too-new or parse-error returns false and leaves _settings as
+// the caller arranged (typically the defaults from settings_set_default()).
+static bool apply_settings_json(const String& json, const char* sourceLabel) {
+    StaticJsonDocument<1536> doc;
+    DeserializationError err = deserializeJson(doc, json);
     if (err) {
-        Serial.printf("Settings: parse error (%s), using defaults\n", err.c_str());
-        if (!settings_save()) Serial.println("Settings: initial save failed");
-        return;
+        Serial.printf("Settings: parse error from %s (%s)\n",
+                      sourceLabel, err.c_str());
+        return false;
     }
 
-    // Read schemaVersion early so future migrations can branch on it.
     // If the file is from a NEWER firmware than we know about, the new
     // fields would silently fall back to defaults (data loss on rollback).
-    // Refuse to load and re-write defaults so the user notices.
+    // Refuse to apply so the caller can try the next source instead.
     int loadedSchema = doc["schemaVersion"] | 1;
     if (loadedSchema > SETTINGS_SCHEMA_VERSION) {
-        Serial.printf("Settings: schema %d > current %d — saving defaults to avoid corruption\n",
-                      loadedSchema, SETTINGS_SCHEMA_VERSION);
-        if (!settings_save()) Serial.println("Settings: defaults save failed");
-        return;
+        Serial.printf("Settings: %s schema %d > current %d — ignoring\n",
+                      sourceLabel, loadedSchema, SETTINGS_SCHEMA_VERSION);
+        return false;
     }
     if (loadedSchema != SETTINGS_SCHEMA_VERSION) {
-        // Older firmware wrote schema < SETTINGS_SCHEMA_VERSION; the
-        // per-field migration paths below ("else if doc.containsKey"
-        // fallbacks) bring the in-RAM Settings up to current.  The next
-        // settings_save() will rewrite the file at the new version.
-        Serial.printf("Settings: schema=%d → %d, applying field-level migrations\n",
-                      loadedSchema, SETTINGS_SCHEMA_VERSION);
+        Serial.printf("Settings: %s schema=%d → %d, applying field-level migrations\n",
+                      sourceLabel, loadedSchema, SETTINGS_SCHEMA_VERSION);
     }
 
     _settings.fontSize        = doc["fontSize"]        | 2;
@@ -122,6 +175,10 @@ void settings_init() {
     _settings.userButtonTapAction    = doc["userButtonTapAction"]    | 1;
     _settings.userButtonDoubleAction = doc["userButtonDoubleAction"] | 2;
     _settings.userButtonLongAction   = doc["userButtonLongAction"]   | 3;
+    _settings.bootButtonEnabled      = doc["bootButtonEnabled"]      | true;
+    _settings.bootButtonTapAction    = doc["bootButtonTapAction"]    | (uint8_t)BTN_ACTION_NEXT_PAGE;
+    _settings.bootButtonDoubleAction = doc["bootButtonDoubleAction"] | (uint8_t)BTN_ACTION_PREV_PAGE;
+    _settings.bootButtonLongAction   = doc["bootButtonLongAction"]   | (uint8_t)BTN_ACTION_SLEEP;
 
     // Migrate old fontSize (0-2) → fontSizeLevel (0-6) if fontSizeLevel wasn't saved
     if (_settings.fontSizeLevel < 0) {
@@ -158,21 +215,66 @@ void settings_init() {
     if (_settings.userButtonTapAction    >= BTN_ACTION_COUNT) _settings.userButtonTapAction    = 0;
     if (_settings.userButtonDoubleAction >= BTN_ACTION_COUNT) _settings.userButtonDoubleAction = 0;
     if (_settings.userButtonLongAction   >= BTN_ACTION_COUNT) _settings.userButtonLongAction   = 0;
+    if (_settings.bootButtonTapAction    >= BTN_ACTION_COUNT) _settings.bootButtonTapAction    = 0;
+    if (_settings.bootButtonDoubleAction >= BTN_ACTION_COUNT) _settings.bootButtonDoubleAction = 0;
+    if (_settings.bootButtonLongAction   >= BTN_ACTION_COUNT) _settings.bootButtonLongAction   = 0;
 
     // Don't log the SSID — even though it's not a credential, it identifies
     // the user's home network on the serial port. Length-only is enough to
     // confirm the load worked.
-    Serial.printf("Settings: loaded (fontLevel=%d, family=%u, sleep=%dmin, refresh=%d, wifi_len=%u)\n",
+    Serial.printf("Settings: loaded from %s (fontLevel=%d, family=%u, sleep=%dmin, refresh=%d, wifi_len=%u)\n",
+                  sourceLabel,
                   _settings.fontSizeLevel, (unsigned)_settings.fontFamily,
                   _settings.sleepTimeoutMin,
                   _settings.refreshEveryPages,
                   (unsigned)_settings.wifiSSID.length());
+    return true;
+}
+
+void settings_init() {
+    settings_set_default();
+
+    // Try SD first.  This is the user-visible storage and surviving across
+    // a firmware re-flash is the whole point.
+    bool fromLegacy = false;
+    String sdJson = load_settings_text_from_sd(fromLegacy);
+    if (sdJson.length() > 0 && apply_settings_json(sdJson, fromLegacy ? "SD-legacy" : "SD")) {
+        if (fromLegacy) {
+            // Rewrite at the new SD-root path (and NVS mirror) then drop
+            // the legacy file so it doesn't shadow future updates.
+            if (settings_save() && SD.exists(SETTINGS_PATH_OLD)) {
+                SD.remove(SETTINGS_PATH_OLD);
+                Serial.println("Settings: removed legacy /books/.settings.json");
+            }
+        } else {
+            // Mirror current JSON into NVS so future boots have a fallback.
+            save_settings_text_to_nvs(sdJson);
+        }
+        return;
+    }
+
+    // SD missing / corrupt / schema-too-new → try NVS mirror.  This catches
+    // the case where the SD file was deleted, the FS got remounted on a
+    // blank card, or a future-firmware schema poisoned the SD file.  NVS
+    // survives a `pio run -t upload` (only `--target erase` wipes it).
+    String nvsJson;
+    if (load_settings_text_from_nvs(nvsJson) && apply_settings_json(nvsJson, "NVS")) {
+        Serial.println("Settings: recovered from NVS — restoring SD file");
+        settings_save();  // rewrites SD with valid JSON
+        return;
+    }
+
+    // Both sources unusable.  Defaults already applied; persist them so
+    // the next boot has *something* to load instead of running this same
+    // fallback chain again.
+    Serial.println("Settings: no usable source, writing defaults");
+    if (!settings_save()) Serial.println("Settings: initial save failed");
 }
 
 bool settings_save() {
-    // Pool sized for 22 fields + their string values; bump if you add more
+    // Pool sized for 26 fields + their string values; bump if you add more
     // keys (overflowed() check below catches the silent-truncate case).
-    StaticJsonDocument<1280> doc;
+    StaticJsonDocument<1536> doc;
     doc["schemaVersion"]   = SETTINGS_SCHEMA_VERSION;
     doc["fontSize"]        = _settings.fontSizeLevel; // write new level as fontSize too for compat
     doc["fontSizeLevel"]   = _settings.fontSizeLevel;
@@ -194,6 +296,10 @@ bool settings_save() {
     doc["userButtonTapAction"]    = _settings.userButtonTapAction;
     doc["userButtonDoubleAction"] = _settings.userButtonDoubleAction;
     doc["userButtonLongAction"]   = _settings.userButtonLongAction;
+    doc["bootButtonEnabled"]      = _settings.bootButtonEnabled;
+    doc["bootButtonTapAction"]    = _settings.bootButtonTapAction;
+    doc["bootButtonDoubleAction"] = _settings.bootButtonDoubleAction;
+    doc["bootButtonLongAction"]   = _settings.bootButtonLongAction;
 
     if (doc.overflowed()) {
         // StaticJsonDocument silently truncates on overflow — refuse the
@@ -203,12 +309,24 @@ bool settings_save() {
     }
     String json;
     serializeJson(doc, json);
-    if (storage_write_text_atomic(SETTINGS_PATH, SETTINGS_TMP, json)) {
-        Serial.println("Settings: saved atomically");
-        return true;
+
+    // Write to both stores so a firmware re-flash that leaves SD intact
+    // (or, conversely, a missing SD on the next boot) still has a path
+    // back to the user's settings.  Each store reports its own error;
+    // we report overall success if either store accepted the write.
+    bool sdOk  = storage_write_text_atomic(SETTINGS_PATH, SETTINGS_TMP, json);
+    bool nvsOk = save_settings_text_to_nvs(json);
+
+    if (sdOk && nvsOk) {
+        Serial.println("Settings: saved (SD+NVS)");
+    } else if (sdOk) {
+        Serial.println("Settings: saved (SD only — NVS write failed)");
+    } else if (nvsOk) {
+        Serial.println("Settings: saved (NVS only — SD write failed)");
+    } else {
+        Serial.println("Settings: save FAILED on both SD and NVS");
     }
-    Serial.println("Settings: atomic save failed");
-    return false;
+    return sdOk || nvsOk;
 }
 
 Settings& settings_get() {

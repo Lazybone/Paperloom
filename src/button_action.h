@@ -2,9 +2,11 @@
 
 #include <stdint.h>
 
-// Configurable actions for the user button (GPIO 48 on T5S3 PRO).
-// Persisted as uint8_t in settings.json; keep stable across firmware versions
-// — append new values, never reorder.
+// Configurable actions for the user-facing buttons on T5S3 PRO
+// (BOOT button on GPIO 0 and user button on PCA9535 IO12). Each gesture
+// (tap / double / long) maps independently to one of these actions via
+// settings. Persisted as uint8_t in settings.json; keep stable across
+// firmware versions — append new values, never reorder.
 enum ButtonAction : uint8_t {
     BTN_ACTION_NONE             = 0,
     BTN_ACTION_BACKLIGHT_TOGGLE = 1,  // Toggle frontlight on/off

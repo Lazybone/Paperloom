@@ -30,12 +30,21 @@ struct Settings {
     bool    frontlightEnabled;     // master on/off
     uint8_t frontlightBrightness;  // 0..100 percent
 
-    // User button (T5S3 PRO GPIO 48). Action per gesture; values from
+    // User button (PCA9535 IO12 on T5S3 PRO). Action per gesture; values from
     // ButtonAction enum in button_action.h. Stored as uint8_t for simple JSON.
     bool    userButtonEnabled;         // master toggle — polling is off unless this is true
     uint8_t userButtonTapAction;       // single short press
     uint8_t userButtonDoubleAction;    // two short presses within window
     uint8_t userButtonLongAction;      // press-and-hold
+
+    // Boot button (GPIO 0). Same configurable gesture model as the user
+    // button. Long-press always falls back to BTN_ACTION_SLEEP when
+    // bootButtonEnabled=false so the device can always be powered down.
+    // ext1 wake-source on GPIO 0 is unconditional, independent of this flag.
+    bool    bootButtonEnabled;
+    uint8_t bootButtonTapAction;
+    uint8_t bootButtonDoubleAction;
+    uint8_t bootButtonLongAction;
 };
 
 void settings_init();           // Load from SD or create defaults

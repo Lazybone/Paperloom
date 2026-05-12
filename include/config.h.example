@@ -64,8 +64,9 @@
 // ─── Buttons ───────────────────────────────────────────────────────
 // ACHTUNG: Auf dem Pro sind die User-Buttons typischerweise am
 // IO-Expander PCA9535 (I²C 0x20), nicht an direkt verfügbaren GPIOs.
-// Workaround bis Hardware-Validation: BOOT-Button (GPIO 0) als
-// einzige Eingabequelle, Wake-Source = ext1 auf GPIO 0.
+// BOOT-Button (GPIO 0) bleibt unkonditionale ext1-Wake-Source.
+// Gesten-Aktionen sind via Settings konfigurierbar
+// (siehe Settings::bootButton* — Tap / Double / Long).
 #define BUTTON_PIN     0
 #define PAGE_BUTTON_PIN 0
 // Configurable user button — physical side button on the PCA9535PW IO
