@@ -1,68 +1,63 @@
 # Security Policy
 
-Paperloom is an internet-connected device firmware (WiFi + OTA updates) for the
-LilyGo T5S3-4.7" e-paper PRO / PRO Lite. We take security reports seriously and
-ask reporters to follow coordinated disclosure.
-
 ## Supported Versions
 
-Only the latest released firmware version receives security fixes. Older
-versions are not patched; please upgrade.
-
 | Version | Supported |
-| ------- | --------- |
-| v0.2.x (latest) | ✓ |
-| < v0.2.0        | ✗ |
+|---------|-----------|
+| v0.2.x  | ✓ Yes     |
+| < v0.2.0| ✗ No      |
+
+Security fixes are back-ported to the latest minor release only. Please keep your device up to date via the on-device OTA updater or by re-flashing the latest release.
 
 ## Reporting a Vulnerability
 
-**Please do not open public GitHub issues for security problems.**
+**Please do NOT open a public GitHub issue for security vulnerabilities.**
 
-Report privately via **GitHub Security Advisories**:
+Instead, please use **GitHub Security Advisories** to report vulnerabilities privately:
 
-➡ https://github.com/Lazybone/Paperloom/security/advisories/new
+1. Go to the repository's **Security** tab
+2. Click **Report a vulnerability**
+3. Fill out the advisory form with as much detail as possible
 
-When reporting, please include:
+Please include:
 
-- Affected firmware version (`Settings → About` on device, or `firmware.bin` SHA)
-- Hardware variant (Pro vs Pro Lite)
-- Reproduction steps or a proof-of-concept
-- Impact assessment (RCE, info disclosure, DoS, persistent vs reset-on-reboot, …)
-- Any suggested mitigation
+- Firmware version (shown on boot screen or in Settings → About)
+- Hardware variant (Pro / Pro Lite)
+- Step-by-step reproduction instructions
+- Impact assessment (crash, data leak, remote code execution, etc.)
+- Suggested fix or patch, if you have one
 
-## What to Expect
+## Response Timeline
 
-- **Acknowledgement**: within 7 days of report.
-- **Initial assessment**: within 14 days.
-- **Embargo period**: up to **90 days** for coordinated disclosure. We may
-  request a shorter or longer window depending on severity, exploitability,
-  and upstream-dependency complexity.
-- **Credit**: reporters are credited in the release notes and advisory unless
-  they request anonymity.
+| Phase | Target |
+|-------|--------|
+| Acknowledgement | Within 48 hours |
+| Initial assessment | Within 5 days |
+| Fix + pre-release test | Within 30 days (critical: 7 days) |
+| Public disclosure | Coordinated with reporter; 90-day embargo default |
 
-## Scope
+We follow a **coordinated disclosure** model. We will not publish details or push a fix before the agreed embargo date unless the vulnerability is already publicly known or actively exploited.
 
-In scope:
+## Security Hardening Notes
 
-- Firmware code in this repository (OTA client, WiFi captive setup, web upload
-  endpoint, EPUB/ZIP parser, settings persistence)
-- Build artefacts published via GitHub Releases
-- Vulnerabilities affecting confidentiality, integrity, or availability of the
-  device or the data it stores (EPUB library, WiFi credentials, settings)
+### Transport & Updates
+- OTA updates are served **only** from GitHub releases over **HTTPS** with DigiCert root-CA pinning.
+- No remote administration interface exists beyond the LAN-local web UI.
 
-Out of scope:
+### Web UI (`Paperloom`)
+- All filesystem paths are validated before use: must start with `/`, no `..` segments, no backslash, no `CR`/`LF` (prevents HTTP header smuggling), no `NUL` bytes, and no path segment beginning with `.` — this isolates internal state files (`.settings.json`, `.progress`, `.linecache`) from being read, written, or deleted via the API.
+- Uploads use atomic `.tmp` + rename to avoid partial-write corruption, and are capped at 200 MB.
+- Filenames are restricted to a safe character set; oversize names are rejected.
+- The settings API never returns the stored WiFi password. The client sends an empty `wifiPass` field to keep the existing password and only sends a new value when the user enters one.
+- Input lengths are bounded server-side (`wifiSSID` ≤ 32, `wifiPass` ≤ 64, numeric ranges clamped).
 
-- Physical attacks (chip decapping, JTAG with hardware access) — these are
-  acknowledged as inherent to a consumer e-paper device and are not in the
-  threat model
-- Vulnerabilities in upstream libraries (`epdiy`, `ArduinoJson`, `JPEGDEC`,
-  `PNGdec`, `tinyxml2`, ESP-IDF) — please report those to their respective
-  maintainers, but feel free to also CC us so we can coordinate a pin/upgrade.
-- Reports based solely on missing security headers in the unauthenticated LAN
-  web upload UI — the README documents the LAN-only threat model.
+### Memory Safety
+- Recently audited paths use `snprintf`-style bounded writes instead of `strcat`/`sprintf` loops; remaining fixed-size buffers carry explicit length guards.
 
-## Hall of Fame
+### Credential Storage
+- WiFi credentials are stored as plaintext JSON in `/.settings.json` on the SD card. The dot-prefix hides the file from the web file browser and the path validator blocks remote access, but **anyone with physical SD-card access can read the password**. Treat the SD card as a credential-bearing asset.
+- A hardware-backed encrypted store (NVS with flash encryption, or a dedicated key in eFuse) is on the roadmap. Contributions welcome — see `CONTRIBUTING.md`.
 
-Reporters who follow coordinated disclosure will be listed here.
+## Acknowledgements
 
-<!-- empty until first report -->
+We credit security researchers who report valid vulnerabilities in the release notes (with their permission).
