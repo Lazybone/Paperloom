@@ -295,10 +295,9 @@ void ui_wifi_draw() {
             connectDots = (connectDots + 1) % 4;
             lastDotsUpdate = millis();
         }
-        char dots[5] = "";
-        for (int i = 0; i < connectDots; i++) {
-            strcat(dots, ".");
-        }
+        char dots[5] = {};
+        int n = (connectDots > 4) ? 4 : connectDots;
+        snprintf(dots, sizeof(dots), "%.*s", n, "....");
         display_draw_text((W + w1) / 2 + 8, y, dots, 0);
 
         y += FONT_H + 30;
