@@ -41,7 +41,8 @@ We follow a **coordinated disclosure** model. We will not publish details or pus
 ## Security Hardening Notes
 
 ### Transport & Updates
-- OTA updates are served **only** from GitHub releases over **HTTPS** with DigiCert root-CA pinning.
+- OTA updates are served **only** from GitHub releases over **HTTPS**. The firmware pins a small bundle of trusted GitHub root CAs (USERTrust ECC for `api.github.com`, ISRG Root X1 for the release CDN, plus DigiCert Global Root CA as a historical fallback). The Arduino-ESP32 default TLS path otherwise has no trust store, so the bundle is the only thing standing between the OTA flow and MITM.
+- Download URLs are constrained to `objects.githubusercontent.com` / `github.com` release paths after redirect resolution.
 - No remote administration interface exists beyond the LAN-local web UI.
 
 ### Web UI (`Paperloom`)
