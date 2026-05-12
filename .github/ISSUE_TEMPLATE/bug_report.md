@@ -1,51 +1,55 @@
 ---
 name: Bug report
-about: Report a problem with Paperloom firmware
-title: "[Bug] "
+about: Create a report to help us improve Paperloom
+title: '[BUG] '
 labels: bug
 assignees: ''
+
 ---
 
 ## Hardware
 
-- [ ] LilyGo T5S3-4.7" e-paper PRO
-- [ ] LilyGo T5S3-4.7" e-paper PRO Lite
-- [ ] Other (specify):
+- [ ] LilyGo T5 E-Paper S3 **Pro**
+- [ ] LilyGo T5 E-Paper S3 **Pro Lite**
+- [ ] Other (please specify)
 
-## Firmware
+## Firmware Version
 
-- Version: <!-- e.g. v0.2.0 — see Settings → About -->
-- Build env: <!-- `default` / `gh_release` / custom -->
-- PlatformIO version: <!-- `pio --version` -->
+<!-- Shown on boot screen or Settings → About -->
+v0.x.x
+
+## Build Environment
+
+- PlatformIO version:
+- Build environment (`default` / `gh_release`):
+- Host OS (Windows / macOS / Linux):
+
+## Describe the Bug
+
+<!-- A clear and concise description of what the bug is. -->
 
 ## Steps to Reproduce
 
-1.
-2.
-3.
+1. Go to '...'
+2. Tap on '....'
+3. Scroll down to '....'
+4. See error
 
 ## Expected Behavior
 
-<!-- What you thought would happen -->
+<!-- What you expected to happen. -->
 
 ## Actual Behavior
 
-<!-- What actually happened -->
+<!-- What actually happened. Include screenshots or photos if UI-related. -->
 
 ## Logs
 
-<details>
-<summary>Serial monitor output</summary>
-
+<!-- If applicable, paste serial monitor output between the backticks: -->
 ```
-<!-- Paste logs here. If a crash/panic is involved, run with
-     monitor_filters = esp32_exception_decoder to get symbolicated traces. -->
+[Paste logs here]
 ```
-
-</details>
 
 ## Additional Context
 
-<!-- Screenshots, problematic EPUB file (link or attach),
-     relevant settings.json (REDACT WiFi password before sharing!),
-     SD card filesystem (FAT32 / exFAT), etc. -->
+<!-- Add any other context about the problem here (SD card brand/size, EPUB source, etc.). -->

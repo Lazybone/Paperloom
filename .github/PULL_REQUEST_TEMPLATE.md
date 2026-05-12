@@ -1,34 +1,27 @@
-<!-- Thanks for contributing to Paperloom!
-     Fill out the sections that apply; remove the rest. -->
-
 ## Summary
 
-<!-- 1-3 bullets: what changed and why -->
+<!-- Briefly describe what this PR does and why. -->
 
-## Related Issue
+## Related Issues
 
-<!-- "Fixes #N" or "Refs #N", or "N/A" -->
-
-## Changes
-
--
+<!-- Link to any related issues: Fixes #123, Closes #456, etc. -->
 
 ## Test Plan
 
-- [ ] Builds clean: `pio run -e default`
-- [ ] Builds release: `pio run -e gh_release` (if release-relevant)
-- [ ] Flashed and verified on hardware: <!-- T5S3 Pro / Pro Lite / both -->
-- [ ] Manual scenarios exercised:
-  -
+<!-- Describe how you tested this change. -->
+
+- [ ] Flashed to **Pro** hardware and verified
+- [ ] Flashed to **Pro Lite** hardware and verified (if display/touch/peripheral related)
+- [ ] Verified `pio run` compiles cleanly for `default` env
+- [ ] Verified `pio run -e gh_release` compiles cleanly
+- [ ] No new compiler warnings (`-Wall -Wextra`)
 
 ## Screenshots / Photos
 
-<!-- Required for any UI change. Photos of the e-paper screen are fine. -->
+<!-- If this PR changes the UI, attach a photo of the e-ink screen showing the result. -->
 
 ## Checklist
 
-- [ ] Code follows project conventions (snake_case files/functions, `#pragma once` headers)
-- [ ] No hardcoded secrets, no `include/config.h` committed
-- [ ] No new `strcpy` / `strcat` / `sprintf` on fixed buffers
-- [ ] `CHANGELOG.md` updated if the change is user-visible
-- [ ] `README.md` updated if behaviour or build steps changed
+- [ ] README updated if user-facing
+- [ ] CHANGELOG.md updated under `## Unreleased` if applicable
+- [ ] Code follows project style (snake_case, `#pragma once`, 4-space indent)
