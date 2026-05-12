@@ -4,6 +4,45 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+### Added
+- BOOT button (GPIO 0) gestures are now configurable from Settings -> Buttons.
+  Tap / double-tap / hold each map to a `ButtonAction` (None, Light toggle,
+  Library, Sleep, Next page, Prev page, Menu). Long-press still falls back to
+  Sleep when the button is disabled so the device can always be powered down.
+- Settings now mirror to NVS (namespace `ereader_set`). On boot the firmware
+  recovers from NVS when `/.settings.json` is missing, parse-fails, or carries
+  a too-new schema, then rewrites the SD copy.
+- On-device picker overlay in Settings for button actions, brightness, and
+  font family. Picker changes save immediately instead of on screen-exit.
+
+### Changed
+- Web settings page redesigned: segmented controls (XS..XL font size,
+  Tight..Loose line spacing), toggle switches, range slider with live percent
+  for brightness, section icons, password reveal, body-dimming for disabled
+  sections, sticky save bar with dirty indicator and Discard / Save buttons.
+- Settings file moved from `/books/.settings.json` to `/.settings.json`; the
+  legacy path is migrated and removed on first boot of v0.2.1.
+- Settings UI label "User Button" -> "IO48 Button" to match the actual
+  PCA9535 IO12 hardware.
+- Release flow: `python3 tools/build.py X.Y.Z` then manual `gh release create`
+  replaces the previous tag-driven CI publish.
+- `CONTRIBUTING.md` rewritten; bug-report and pull-request templates refreshed.
+
+### Fixed
+- Hardened the WiFi-connect "dots" animation buffer: replaced the unbounded
+  `strcat` loop with `snprintf` and added explicit length guards. The previous
+  code was safe by happenstance (mod-4 counter) but a future refactor could
+  have overflowed.
+- Removed a redundant `dy < 0` bounds check in `raw4_accumulate` that was
+  always false at the call site.
+
+### Security
+- `SECURITY.md` rewritten with concrete hardening details: path-validator
+  rules (no `..`, no `\`, no CR/LF, no NUL, no dot-prefixed segments isolating
+  `/.settings.json`), atomic writes, 200 MB upload cap, settings API never
+  returning `wifiPass`, snprintf hardening pass, and an explicit roadmap note
+  for plaintext SD-card credentials (physical-access risk).
+
 ## v0.2.0 — 2026-05-12
 
 ### Changed
