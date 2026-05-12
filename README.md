@@ -39,11 +39,27 @@ Version: **v0.2.1**
 
 You have two options.
 
-**Option A — Browser installer (no tools required).**
+#### Option A — Browser installer (recommended, no tools required)
 
-Open **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** in **Chrome, Edge, or Opera** on a desktop computer. Plug the e-reader in over USB-C and click *Install*. The page uses the browser's Web Serial API to flash the firmware directly — no PlatformIO, no esptool, no command line.
+The fastest way. Works on Windows, macOS, Linux, and ChromeOS — no drivers, no PlatformIO, no command line.
 
-**Option B — PlatformIO (for developers).**
+1. Open **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** in **Google Chrome**, **Microsoft Edge**, or **Opera** on a desktop computer.
+   _(Firefox and Safari are not supported — they don't implement Web Serial.)_
+2. Plug the e-reader into your computer with a **USB-C cable** that supports data (not just charging).
+3. On the device, hold the **BOOT** button while pressing **RST** once, then release BOOT. This forces download mode.
+4. On the web page, click **Connect** → pick the serial port that appears (usually labeled `USB JTAG/serial debug unit` or similar).
+5. Click **Install Paperloom** → wait ~30–60 seconds for the flash to complete.
+6. When it's done, press **RST** once. The device boots into Paperloom.
+
+If no port shows up, try a different USB-C cable — many cables are power-only and silently won't enumerate as a serial device.
+
+On Linux, make sure your user is in the `dialout` group:
+
+```bash
+sudo usermod -aG dialout $USER   # log out and back in afterwards
+```
+
+#### Option B — PlatformIO (for developers)
 
 ```bash
 cp include/config.h.example include/config.h

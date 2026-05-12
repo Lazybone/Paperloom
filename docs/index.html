@@ -4,189 +4,632 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Paperloom — Web Installer</title>
-  <meta name="description" content="Install Paperloom firmware on your LilyGo T5 E-Paper S3 Pro from your browser. No PlatformIO or command line required." />
+  <meta name="description" content="Install Paperloom firmware on your LilyGo T5 E-Paper S3 Pro from your browser. No drivers, no command line." />
+  <meta name="theme-color" content="#f4ede0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1a1714" media="(prefers-color-scheme: dark)" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..700,30..100&family=Inter:wght@400;500;600&display=swap" />
 
   <script type="module" src="https://unpkg.com/esp-web-tools@10/dist/web/install-button.js?module"></script>
 
   <style>
     :root {
-      --bg: #f5f3ee;
-      --ink: #1e1c19;
-      --muted: #635e57;
-      --accent: #2a4d3a;
-      --accent-strong: #1c3527;
-      --border: #d8d2c4;
-      --card: #fffdf8;
-    }
+      /* Paper (light) palette in OKLCH — warm cream + ink + forest accent. */
+      --bg:            oklch(96% 0.012 85);
+      --bg-deep:       oklch(93% 0.014 85);
+      --surface:       oklch(99% 0.008 85);
+      --surface-edge:  oklch(86% 0.015 80);
+      --ink:           oklch(22% 0.015 60);
+      --ink-muted:     oklch(46% 0.018 60);
+      --ink-soft:      oklch(60% 0.018 60);
+      --accent:        oklch(42% 0.085 155);
+      --accent-hover:  oklch(35% 0.09 155);
+      --accent-ink:    oklch(98% 0.015 85);
+      --rule:          oklch(82% 0.018 80);
+      --highlight:     oklch(94% 0.06 95);
 
-    * { box-sizing: border-box; }
+      --radius-card: 18px;
+      --radius-pill: 999px;
+      --shadow-card: 0 1px 0 oklch(80% 0.02 80 / 0.6), 0 18px 40px -28px oklch(30% 0.05 60 / 0.18);
 
-    body {
-      margin: 0;
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      background: var(--bg);
-      color: var(--ink);
-      line-height: 1.55;
-      min-height: 100vh;
-      display: flex;
-      flex-direction: column;
-    }
+      --font-display: "Fraunces", Georgia, "Iowan Old Style", serif;
+      --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
-    main {
-      max-width: 720px;
-      margin: 0 auto;
-      padding: 4rem 1.5rem 5rem;
-      flex: 1;
-    }
+      --measure-prose: 38rem;
+      --measure-wide: 56rem;
 
-    header {
-      text-align: center;
-      margin-bottom: 2.5rem;
-    }
-
-    .logo {
-      font-size: 2.75rem;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      margin: 0 0 0.5rem;
-      color: var(--accent-strong);
-    }
-
-    .tagline {
-      font-size: 1.1rem;
-      color: var(--muted);
-      margin: 0;
-    }
-
-    .card {
-      background: var(--card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 2rem;
-      margin-bottom: 1.5rem;
-      box-shadow: 0 1px 0 rgba(0, 0, 0, 0.02);
-    }
-
-    h2 {
-      margin: 0 0 1rem;
-      font-size: 1.3rem;
-      color: var(--accent-strong);
-    }
-
-    p { margin: 0 0 1rem; }
-
-    .install-row {
-      display: flex;
-      flex-direction: column;
-      align-items: center;
-      gap: 1rem;
-      padding: 1.5rem 0 0.5rem;
-    }
-
-    esp-web-install-button {
-      --esp-tools-button-color: #fff;
-      --esp-tools-button-text-color: var(--accent-strong);
-      --esp-tools-button-border-color: var(--accent);
-    }
-
-    .browser-warning {
-      font-size: 0.9rem;
-      color: var(--muted);
-      text-align: center;
-      max-width: 32rem;
-    }
-
-    ol, ul { padding-left: 1.25rem; }
-    li { margin-bottom: 0.4rem; }
-
-    code {
-      font-family: "SF Mono", Menlo, Consolas, monospace;
-      font-size: 0.92em;
-      background: rgba(42, 77, 58, 0.08);
-      padding: 0.1em 0.35em;
-      border-radius: 4px;
-    }
-
-    a { color: var(--accent); }
-    a:hover { color: var(--accent-strong); }
-
-    footer {
-      text-align: center;
-      padding: 2rem 1rem;
-      font-size: 0.85rem;
-      color: var(--muted);
-      border-top: 1px solid var(--border);
-    }
-
-    .badge {
-      display: inline-block;
-      font-size: 0.75rem;
-      font-weight: 600;
-      padding: 0.2em 0.6em;
-      border-radius: 999px;
-      background: var(--accent);
-      color: #fff;
-      vertical-align: middle;
-      margin-left: 0.5em;
+      --duration-fast: 150ms;
+      --duration-base: 220ms;
+      --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
     }
 
     @media (prefers-color-scheme: dark) {
       :root {
-        --bg: #181614;
-        --ink: #ece8df;
-        --muted: #a39d92;
-        --accent: #7fb98c;
-        --accent-strong: #b8e4c1;
-        --border: #322e29;
-        --card: #211e1a;
+        /* Lamplight (dark) palette — warm dark + cream + luminous green. */
+        --bg:           oklch(18% 0.012 70);
+        --bg-deep:      oklch(15% 0.012 70);
+        --surface:      oklch(22% 0.013 70);
+        --surface-edge: oklch(30% 0.014 70);
+        --ink:          oklch(94% 0.015 85);
+        --ink-muted:    oklch(72% 0.018 80);
+        --ink-soft:     oklch(56% 0.018 75);
+        --accent:       oklch(78% 0.12 150);
+        --accent-hover: oklch(86% 0.13 150);
+        --accent-ink:   oklch(18% 0.012 70);
+        --rule:         oklch(32% 0.015 70);
+        --highlight:    oklch(28% 0.04 85);
+        --shadow-card:  0 1px 0 oklch(32% 0.015 70), 0 20px 40px -28px oklch(8% 0.01 70 / 0.6);
       }
+    }
+
+    *,
+    *::before,
+    *::after { box-sizing: border-box; }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      margin: 0;
+      font-family: var(--font-body);
+      font-size: 17px;
+      line-height: 1.6;
+      color: var(--ink);
+      background: var(--bg);
+      -webkit-font-smoothing: antialiased;
+      text-rendering: optimizeLegibility;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      /* Faint warm-paper grain — pure SVG, no external request. */
+      background-image:
+        radial-gradient(at 100% 0%, oklch(92% 0.04 80 / 0.55), transparent 55%),
+        radial-gradient(at 0% 100%, oklch(91% 0.05 110 / 0.35), transparent 60%),
+        url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      background-attachment: fixed;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      body {
+        background-image:
+          radial-gradient(at 100% 0%, oklch(28% 0.03 60 / 0.6), transparent 55%),
+          radial-gradient(at 0% 100%, oklch(25% 0.04 130 / 0.4), transparent 60%),
+          url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+      }
+    }
+
+    a {
+      color: var(--accent);
+      text-decoration: underline;
+      text-decoration-thickness: 1px;
+      text-underline-offset: 3px;
+      transition: color var(--duration-fast) var(--ease);
+    }
+    a:hover { color: var(--accent-hover); }
+
+    a:focus-visible,
+    button:focus-visible,
+    esp-web-install-button:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    /* ─── Layout shell ────────────────────────────────────────────────── */
+
+    .shell {
+      max-width: var(--measure-wide);
+      margin: 0 auto;
+      padding: clamp(2.5rem, 4vw + 1rem, 5rem) clamp(1.25rem, 2vw + 0.75rem, 2.5rem) 0;
+      flex: 1;
+      width: 100%;
+    }
+
+    /* ─── Masthead ────────────────────────────────────────────────────── */
+
+    .masthead {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      padding-bottom: 2.5rem;
+      border-bottom: 1px solid var(--rule);
+      margin-bottom: clamp(3rem, 7vh, 5rem);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 0.65rem;
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-variation-settings: "opsz" 18, "SOFT" 50;
+      font-size: 1.05rem;
+      letter-spacing: 0.01em;
+      color: var(--ink);
+    }
+
+    .brand-mark {
+      width: 26px;
+      height: 26px;
+      color: var(--accent);
+      flex-shrink: 0;
+    }
+
+    .masthead-meta {
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+      font-feature-settings: "tnum";
+    }
+    .masthead-meta strong {
+      color: var(--ink);
+      font-weight: 500;
+    }
+
+    /* ─── Hero ────────────────────────────────────────────────────────── */
+
+    .hero {
+      max-width: var(--measure-prose);
+      margin-bottom: clamp(3rem, 7vh, 5rem);
+    }
+
+    .eyebrow {
+      display: inline-block;
+      font-size: 0.78rem;
+      letter-spacing: 0.18em;
+      text-transform: uppercase;
+      font-weight: 500;
+      color: var(--accent);
+      padding-bottom: 1.25rem;
+      position: relative;
+    }
+    .eyebrow::after {
+      content: "";
+      position: absolute;
+      left: 0;
+      bottom: 0.6rem;
+      width: 2.5rem;
+      height: 1px;
+      background: var(--accent);
+    }
+
+    .hero h1 {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-variation-settings: "opsz" 144, "SOFT" 30;
+      font-size: clamp(2.8rem, 5.5vw + 1rem, 5rem);
+      line-height: 1.02;
+      letter-spacing: -0.02em;
+      margin: 0.5rem 0 1.5rem;
+      color: var(--ink);
+    }
+    .hero h1 em {
+      font-style: italic;
+      font-weight: 300;
+      font-variation-settings: "opsz" 144, "SOFT" 100;
+      color: var(--accent);
+    }
+
+    .hero p {
+      font-size: clamp(1.05rem, 0.5vw + 0.95rem, 1.2rem);
+      color: var(--ink-muted);
+      max-width: 32rem;
+      margin: 0;
+    }
+
+    /* ─── Install card ────────────────────────────────────────────────── */
+
+    .install {
+      background: var(--surface);
+      border: 1px solid var(--surface-edge);
+      border-radius: var(--radius-card);
+      padding: clamp(1.75rem, 2vw + 1rem, 2.75rem);
+      margin-bottom: 3rem;
+      box-shadow: var(--shadow-card);
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.75rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .install::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: linear-gradient(to bottom, var(--accent), transparent 65%);
+      opacity: 0.55;
+    }
+
+    @media (min-width: 720px) {
+      .install {
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 2.5rem;
+      }
+    }
+
+    .install-copy h2 {
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-variation-settings: "opsz" 36;
+      font-size: 1.6rem;
+      line-height: 1.15;
+      margin: 0 0 0.5rem;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+    .install-copy p {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 0.95rem;
+      max-width: 28rem;
+    }
+
+    .install-cta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    @media (min-width: 720px) {
+      .install-cta { align-items: flex-end; }
+    }
+
+    /* Style the ESP Web Install Button via its CSS custom properties. */
+    esp-web-install-button {
+      --esp-tools-button-color: var(--accent);
+      --esp-tools-button-text-color: var(--accent-ink);
+      --esp-tools-button-border-color: var(--accent);
+      display: inline-block;
+    }
+    esp-web-install-button::part(button),
+    esp-web-install-button button {
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: 0.01em;
+      padding: 0.95rem 1.6rem;
+      border-radius: var(--radius-pill);
+      min-height: 48px;
+      transition: transform var(--duration-fast) var(--ease),
+                  background var(--duration-fast) var(--ease);
+    }
+    esp-web-install-button::part(button):hover,
+    esp-web-install-button button:hover {
+      transform: translateY(-1px);
+    }
+
+    /* Slotted fallback messages inherit card-level styling. */
+    .slot-message {
+      display: block;
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      color: var(--ink-muted);
+      max-width: 22rem;
+      line-height: 1.5;
+    }
+    @media (min-width: 720px) {
+      .slot-message { text-align: right; margin-left: auto; }
+    }
+
+    .browser-note {
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .browser-note svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      stroke: var(--ink-soft);
+    }
+
+    /* ─── Section primitives ──────────────────────────────────────────── */
+
+    section.spread {
+      padding: clamp(2.5rem, 5vh, 4rem) 0;
+      border-top: 1px solid var(--rule);
+    }
+
+    .section-title {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-variation-settings: "opsz" 48;
+      font-size: clamp(1.6rem, 1.5vw + 1rem, 2.1rem);
+      line-height: 1.15;
+      letter-spacing: -0.01em;
+      margin: 0 0 0.4rem;
+      color: var(--ink);
+    }
+    .section-title em {
+      font-style: italic;
+      color: var(--accent);
+      font-weight: 300;
+    }
+    .section-lede {
+      color: var(--ink-muted);
+      font-size: 1rem;
+      max-width: var(--measure-prose);
+      margin: 0 0 clamp(2rem, 4vh, 2.75rem);
+    }
+
+    /* ─── Steps (mini-walkthrough) ────────────────────────────────────── */
+
+    .steps {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 1.25rem;
+    }
+    @media (min-width: 760px) {
+      .steps { grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
+    }
+
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--surface-edge);
+      border-radius: var(--radius-card);
+      padding: 1.5rem 1.5rem 1.4rem;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      column-gap: 1.1rem;
+      align-items: start;
+      box-shadow: var(--shadow-card);
+      transition: transform var(--duration-base) var(--ease);
+    }
+    .step:hover { transform: translateY(-2px); }
+
+    .step-num {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-style: italic;
+      font-variation-settings: "opsz" 72;
+      font-size: 2.4rem;
+      line-height: 1;
+      color: var(--accent);
+      grid-row: 1 / span 2;
+      align-self: center;
+      min-width: 2ch;
+    }
+
+    .step h3 {
+      font-family: var(--font-body);
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      margin: 0 0 0.25rem;
+      color: var(--ink);
+    }
+    .step p {
+      margin: 0;
+      font-size: 0.93rem;
+      color: var(--ink-muted);
+      line-height: 1.55;
+    }
+    .step kbd {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.82em;
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      border: 1px solid var(--rule);
+      background: var(--bg-deep);
+      color: var(--ink);
+    }
+
+    /* ─── Help / troubleshooting ──────────────────────────────────────── */
+
+    details.faq {
+      border-bottom: 1px solid var(--rule);
+      padding: 1.1rem 0;
+    }
+    details.faq:first-of-type { border-top: 1px solid var(--rule); }
+    details.faq summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: 1.02rem;
+      font-weight: 500;
+      color: var(--ink);
+      padding: 0.25rem 0;
+      min-height: 44px;
+    }
+    details.faq summary::-webkit-details-marker { display: none; }
+    details.faq summary::after {
+      content: "+";
+      font-family: var(--font-display);
+      font-weight: 300;
+      font-size: 1.6rem;
+      line-height: 1;
+      color: var(--accent);
+      transition: transform var(--duration-base) var(--ease);
+    }
+    details.faq[open] summary::after {
+      content: "−";
+    }
+    details.faq .faq-body {
+      padding: 0.5rem 0 0.25rem;
+      color: var(--ink-muted);
+      font-size: 0.95rem;
+      max-width: var(--measure-prose);
+    }
+    details.faq code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.85em;
+      background: var(--highlight);
+      padding: 0.12em 0.4em;
+      border-radius: 4px;
+      color: var(--ink);
+    }
+
+    /* ─── Footer ──────────────────────────────────────────────────────── */
+
+    footer {
+      margin-top: clamp(3rem, 6vh, 5rem);
+      padding: 2rem clamp(1.25rem, 2vw + 0.75rem, 2.5rem);
+      border-top: 1px solid var(--rule);
+      background: transparent;
+    }
+    .footer-row {
+      max-width: var(--measure-wide);
+      margin: 0 auto;
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: 0.86rem;
+      color: var(--ink-muted);
+    }
+    .footer-row .colophon {
+      font-family: var(--font-display);
+      font-style: italic;
+      font-weight: 400;
+      font-variation-settings: "opsz" 18;
+    }
+
+    /* ─── Reduced motion ──────────────────────────────────────────────── */
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
+      .step:hover { transform: none; }
     }
   </style>
 </head>
 <body>
-  <main>
-    <header>
-      <h1 class="logo">Paperloom</h1>
-      <p class="tagline">Browser-based firmware installer for your LilyGo e-reader.</p>
+  <div class="shell">
+    <header class="masthead">
+      <div class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 4.5C4 3.7 4.7 3 5.5 3H11v18H5.5C4.7 21 4 20.3 4 19.5V4.5Z" />
+          <path d="M20 4.5C20 3.7 19.3 3 18.5 3H13v18h5.5c.8 0 1.5-.7 1.5-1.5V4.5Z" />
+          <path d="M12 3v18" stroke-dasharray="1 2" />
+        </svg>
+        Paperloom
+      </div>
+      <div class="masthead-meta">
+        <strong>v0.2.1</strong> · Web installer
+      </div>
     </header>
 
-    <section class="card">
-      <h2>Install firmware</h2>
-      <p>Connect your <strong>LilyGo T5 E-Paper S3 Pro</strong> (or Pro Lite) to this computer over USB-C, then click below.</p>
+    <section class="hero" aria-labelledby="hero-heading">
+      <span class="eyebrow">Browser-flashable firmware</span>
+      <h1 id="hero-heading">A reader that lives <em>quietly</em> on your shelf.</h1>
+      <p>Paperloom is a paper-first reader for the LilyGo T5 E-Paper S3 Pro. Plug yours in below — your browser will do the rest. No drivers, no terminal, no PlatformIO.</p>
+    </section>
 
-      <div class="install-row">
+    <section class="install" aria-labelledby="install-heading">
+      <div class="install-copy">
+        <h2 id="install-heading">Install the latest firmware</h2>
+        <p>Connect your reader over USB-C and click <em>Install</em>. Takes about a minute, end to end.</p>
+      </div>
+      <div class="install-cta">
         <esp-web-install-button manifest="./manifest.json">
-          <span slot="unsupported">Your browser doesn't support Web Serial. Use Chrome, Edge, or Opera on desktop.</span>
-          <span slot="not-allowed">Web Serial is disabled. Open this page over HTTPS in a supported browser.</span>
+          <button slot="activate" type="button">Install Paperloom</button>
+          <span slot="unsupported" class="slot-message">
+            This browser doesn't support Web Serial. Open this page in Chrome, Edge, or Opera on Mac, Windows, or Linux to install over USB.
+          </span>
+          <span slot="not-allowed" class="slot-message">
+            Web Serial needs a secure origin. Reload this page over <code>https://</code> and try again.
+          </span>
         </esp-web-install-button>
-        <p class="browser-warning">Requires Chrome, Edge, or Opera on desktop. Firefox and Safari are not supported.</p>
+        <span class="browser-note" aria-live="polite">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v4M12 16h.01" />
+          </svg>
+          Use Chrome, Edge, or Opera on a desktop computer.
+        </span>
       </div>
     </section>
 
-    <section class="card">
-      <h2>How it works</h2>
-      <ol>
-        <li>Plug the e-reader into your computer with a USB-C cable.</li>
-        <li>Click <em>Connect</em> and select the device port (look for <code>USB JTAG/serial debug unit</code>).</li>
-        <li>Click <em>Install Paperloom</em> and wait for the flash to finish (~30–60 seconds).</li>
-        <li>The device reboots into Paperloom automatically.</li>
+    <section class="spread" aria-labelledby="how-heading">
+      <h2 class="section-title" id="how-heading">How it <em>works</em></h2>
+      <p class="section-lede">Four small steps. After this, your reader updates itself over WiFi — you'll never need this page again.</p>
+
+      <ol class="steps">
+        <li class="step">
+          <span class="step-num" aria-hidden="true">i</span>
+          <div>
+            <h3>Plug in the e-reader</h3>
+            <p>Connect a USB-C cable that supports data (some thin cables only carry power and won't show up on your computer).</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">ii</span>
+          <div>
+            <h3>Open the install dialog</h3>
+            <p>Click <em>Install Paperloom</em> above, then pick the serial port labeled <kbd>USB JTAG/serial debug unit</kbd>.</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">iii</span>
+          <div>
+            <h3>Let it flash</h3>
+            <p>The installer writes the firmware in about 30–60 seconds. The device's screen will stay blank during this — that's normal.</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">iv</span>
+          <div>
+            <h3>Press <kbd>RST</kbd> once</h3>
+            <p>The reader boots into Paperloom. From here, future updates arrive over WiFi via <em>Settings → Firmware Update</em>.</p>
+          </div>
+        </li>
       </ol>
-      <p>You only need this once. From then on, the device updates itself over WiFi via <em>Settings → Firmware Update</em>.</p>
     </section>
 
-    <section class="card">
-      <h2>Troubleshooting</h2>
-      <ul>
-        <li><strong>No device shows up?</strong> Press the small <code>RST</code> button on the device while it's plugged in, then click Connect again.</li>
-        <li><strong>"Failed to initialize" error?</strong> Try a different USB-C cable — some cables are power-only.</li>
-        <li><strong>Linux:</strong> add yourself to the <code>dialout</code> group (<code>sudo usermod -aG dialout $USER</code>) and re-login.</li>
-        <li><strong>Manual flash:</strong> the firmware binaries are attached to every <a href="https://github.com/Lazybone/Paperloom/releases">GitHub release</a> if you prefer <code>esptool.py</code> or PlatformIO.</li>
-      </ul>
+    <section class="spread" aria-labelledby="help-heading">
+      <h2 class="section-title" id="help-heading">If something goes <em>sideways</em></h2>
+      <p class="section-lede">A short list of things to try before you give up. Most installer issues come down to the cable.</p>
+
+      <details class="faq">
+        <summary>The device doesn't show up when I click Connect</summary>
+        <div class="faq-body">
+          <p>Hold the <kbd>BOOT</kbd> button on the device, press <kbd>RST</kbd> once, then release <kbd>BOOT</kbd>. This forces the chip into download mode. Click <em>Install Paperloom</em> again and the port should appear.</p>
+        </div>
+      </details>
+
+      <details class="faq">
+        <summary>"Failed to initialize" or the install stalls</summary>
+        <div class="faq-body">
+          <p>The cable is the most common culprit. Try a different USB-C cable — ideally one that's known to carry data (the cable that came with a phone or laptop is a safer bet than a random charging cable).</p>
+        </div>
+      </details>
+
+      <details class="faq">
+        <summary>I'm on Linux and the port isn't visible</summary>
+        <div class="faq-body">
+          <p>Add your user to the <code>dialout</code> group, then log out and back in:</p>
+          <p><code>sudo usermod -aG dialout $USER</code></p>
+        </div>
+      </details>
+
+      <details class="faq">
+        <summary>I'd rather flash it myself with esptool or PlatformIO</summary>
+        <div class="faq-body">
+          <p>The firmware binaries (<code>firmware.bin</code>, the merged install image, and a friendly download copy) are attached to every <a href="https://github.com/Lazybone/Paperloom/releases">GitHub release</a>. Use whichever tool you prefer.</p>
+        </div>
+      </details>
     </section>
-  </main>
+  </div>
 
   <footer>
-    Paperloom is open source under the MIT license · <a href="https://github.com/Lazybone/Paperloom">github.com/Lazybone/Paperloom</a>
+    <div class="footer-row">
+      <span class="colophon">Set in Fraunces &amp; Inter. Made with care.</span>
+      <span>Open source · <a href="https://github.com/Lazybone/Paperloom">github.com/Lazybone/Paperloom</a></span>
+    </div>
   </footer>
 </body>
 </html>
