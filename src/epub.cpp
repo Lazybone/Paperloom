@@ -1,0 +1,1287 @@
+#include "epub.h"
+#include "miniz.h"
+#define z_stream     mz_stream
+#define Z_OK         MZ_OK
+#define Z_STREAM_END MZ_STREAM_END
+#define Z_FINISH     MZ_FINISH
+#define MAX_WBITS    15
+#include <cstdio>
+#include <cstring>
+#include <cerrno>
+#include <algorithm>
+#include <SD.h>
+
+// ═══════════════════════════════════════════════════════════════════
+// ZipReader — lightweight ZIP reader using ESP-IDF zlib
+// ═══════════════════════════════════════════════════════════════════
+
+static uint16_t read16(const uint8_t* p) { return p[0] | (p[1] << 8); }
+static uint32_t read32(const uint8_t* p) { return p[0] | (p[1] << 8) | (p[2] << 16) | (p[3] << 24); }
+static String decodeEntities(const String& input);
+static String stripTagsAndTrim(const String& html);
+static String urlDecodePathComponent(const String& input);
+static bool extractImageAttr(const String& tagContent, String& outSrc);
+
+bool ZipReader::open(const char* path) {
+    close();
+
+    // On ESP32 Arduino, SD card is mounted at /sd in VFS.
+    // Arduino SD.open() handles this transparently, but POSIX fopen() needs
+    // the full VFS path.  Prepend /sd if the caller passes a bare SD path.
+    String vfsPath;
+    if (strncmp(path, "/sd", 3) == 0) {
+        vfsPath = path;
+    } else {
+        vfsPath = String("/sd") + path;
+    }
+
+    Serial.printf("ZIP: opening %s (vfs: %s)\n", path, vfsPath.c_str());
+    _f = fopen(vfsPath.c_str(), "rb");
+    if (!_f) {
+        Serial.printf("ZIP: cannot open %s (errno %d)\n", vfsPath.c_str(), errno);
+        return false;
+    }
+    return parseCentralDirectory();
+}
+
+void ZipReader::close() {
+    if (_f) { fclose(_f); _f = nullptr; }
+    _entries.clear();
+}
+
+// Defensive caps for ZIP fields. EPUBs in practice are well under these
+// limits; anything larger is either corrupt or hostile (zip-bomb).
+static const uint32_t MAX_ZIP_CD_SIZE      = 4UL * 1024UL * 1024UL;     //  4 MB central directory
+static const uint32_t MAX_ZIP_ENTRY_SIZE   = 16UL * 1024UL * 1024UL;    // 16 MB per file (EPUB chapters cap)
+
+bool ZipReader::parseCentralDirectory() {
+    // Find End of Central Directory record (search backwards)
+    fseek(_f, 0, SEEK_END);
+    long fileSize = ftell(_f);
+    if (fileSize < 22) return false;        // smallest legal ZIP is 22 bytes (empty EOCD)
+    long searchStart = (fileSize > 65558) ? fileSize - 65558 : 0;
+    long searchLen = fileSize - searchStart;
+
+    // Use PSRAM — DRAM is precious (320 KB total) and during a 100-book
+    // cold scan we'd otherwise burn up to 65 KB DRAM per book sequentially.
+    uint8_t* buf = (uint8_t*)ps_malloc(searchLen);
+    if (!buf) {
+        Serial.printf("ZIP: ps_malloc(%ld) failed for EOCD search\n", searchLen);
+        return false;
+    }
+
+    fseek(_f, searchStart, SEEK_SET);
+    if (fread(buf, 1, searchLen, _f) != (size_t)searchLen) {
+        // Short read on the EOCD search window — card error or truncated file.
+        free(buf);
+        return false;
+    }
+
+    long eocdOff = -1;
+    for (long i = searchLen - 22; i >= 0; i--) {
+        if (buf[i] == 0x50 && buf[i+1] == 0x4b &&
+            buf[i+2] == 0x05 && buf[i+3] == 0x06) {
+            eocdOff = i;
+            break;
+        }
+    }
+    if (eocdOff < 0) { free(buf); return false; }
+
+    uint16_t numEntries = read16(buf + eocdOff + 10);
+    uint32_t cdSize     = read32(buf + eocdOff + 12);
+    uint32_t cdOffset   = read32(buf + eocdOff + 16);
+    free(buf);
+
+    // Hard cap + bounds check before allocating: a crafted EPUB can claim
+    // any cdSize up to 4 GB, which would either fail malloc (silent corrupt)
+    // or succeed and consume all RAM.
+    if (cdSize == 0 || cdSize > MAX_ZIP_CD_SIZE) {
+        Serial.printf("ZIP: rejected cdSize=%u\n", cdSize);
+        return false;
+    }
+    if (cdOffset >= (uint32_t)fileSize ||
+        (uint64_t)cdOffset + cdSize > (uint64_t)fileSize) {
+        Serial.println("ZIP: cdOffset/cdSize outside file");
+        return false;
+    }
+
+    // Read central directory — PSRAM, same reasoning as the EOCD buffer.
+    uint8_t* cd = (uint8_t*)ps_malloc(cdSize);
+    if (!cd) return false;
+
+    fseek(_f, cdOffset, SEEK_SET);
+    if (fread(cd, 1, cdSize, _f) != cdSize) {
+        free(cd);
+        return false;
+    }
+
+    uint32_t pos = 0;
+    for (int i = 0; i < numEntries && pos + 46 <= cdSize; i++) {
+        if (read32(cd + pos) != 0x02014b50) break;
+
+        ZipEntry entry;
+        entry.compression_method = read16(cd + pos + 10);
+        entry.crc_32             = read32(cd + pos + 16);
+        entry.compressed_size    = read32(cd + pos + 20);
+        entry.uncompressed_size  = read32(cd + pos + 24);
+        entry.local_header_offset = read32(cd + pos + 42);
+
+        // Validate per-entry fields before trusting them later.
+        if (entry.local_header_offset >= (uint32_t)fileSize) break;
+        if (entry.compressed_size > MAX_ZIP_ENTRY_SIZE) break;
+        if (entry.uncompressed_size > MAX_ZIP_ENTRY_SIZE) break;
+
+        uint16_t nameLen    = read16(cd + pos + 28);
+        uint16_t extraLen   = read16(cd + pos + 30);
+        uint16_t commentLen = read16(cd + pos + 32);
+
+        if (pos + 46 + nameLen > cdSize) break;
+
+        char* name = (char*)malloc(nameLen + 1);
+        if (!name) break;                    // OOM — stop, don't deref null
+        memcpy(name, cd + pos + 46, nameLen);
+        name[nameLen] = 0;
+        entry.name = String(name);
+        free(name);
+
+        _entries.push_back(entry);
+
+        // Guard against pos overflow when extraLen+commentLen push us past cdSize.
+        uint32_t step = 46u + (uint32_t)nameLen + (uint32_t)extraLen + (uint32_t)commentLen;
+        if (step > cdSize - pos) break;
+        pos += step;
+    }
+    free(cd);
+
+    Serial.printf("ZIP: found %d entries\n", _entries.size());
+    return _entries.size() > 0;
+}
+
+bool ZipReader::fileExists(const char* name) {
+    for (const auto& e : _entries) {
+        if (e.name == name) return true;
+    }
+    return false;
+}
+
+bool ZipReader::getFileSignature(const char* name, uint32_t& outCrc32, uint32_t& compressedSize,
+                                 uint32_t& uncompressedSize, uint16_t& compressionMethod) {
+    for (const auto& e : _entries) {
+        if (e.name != name) continue;
+        outCrc32 = e.crc_32;
+        compressedSize = e.compressed_size;
+        uncompressedSize = e.uncompressed_size;
+        compressionMethod = e.compression_method;
+        return true;
+    }
+    return false;
+}
+
+static bool zipSeekToData(FILE* f, const ZipEntry& entry) {
+    fseek(f, entry.local_header_offset, SEEK_SET);
+    uint8_t lfh[30];
+    if (fread(lfh, 1, 30, f) != 30) return false;
+    if (read32(lfh) != 0x04034b50) return false;
+
+    uint16_t nameLen  = read16(lfh + 26);
+    uint16_t extraLen = read16(lfh + 28);
+    long dataOffset = entry.local_header_offset + 30 + nameLen + extraLen;
+    return fseek(f, dataOffset, SEEK_SET) == 0;
+}
+
+uint8_t* ZipReader::readFile(const char* name, size_t* outSize) {
+    *outSize = 0;
+
+    for (const auto& entry : _entries) {
+        if (entry.name != name) continue;
+
+        if (!zipSeekToData(_f, entry)) return nullptr;
+
+        // Re-check entry sizes here — parseCentralDirectory enforced these
+        // already, but defending the readFile call site is cheap and keeps
+        // the hardened invariants local.
+        if (entry.uncompressed_size == 0 ||
+            entry.uncompressed_size > MAX_ZIP_ENTRY_SIZE) return nullptr;
+
+        if (entry.compression_method == 0) {
+            // STORED — just read directly
+            uint8_t* data = (uint8_t*)ps_malloc(entry.uncompressed_size + 1);
+            if (!data) return nullptr;
+            if (fread(data, 1, entry.uncompressed_size, _f) != entry.uncompressed_size) {
+                free(data);
+                return nullptr;
+            }
+            data[entry.uncompressed_size] = 0;
+            *outSize = entry.uncompressed_size;
+            return data;
+
+        } else if (entry.compression_method == 8) {
+            // DEFLATE — inflate using zlib
+            if (entry.compressed_size == 0 ||
+                entry.compressed_size > MAX_ZIP_ENTRY_SIZE) return nullptr;
+            // PSRAM, not DRAM. A 4 MB chapter via DRAM malloc would blow the
+            // 320 KB internal heap; ps_malloc has 8 MB headroom on this SoC.
+            uint8_t* compressed = (uint8_t*)ps_malloc(entry.compressed_size);
+            if (!compressed) {
+                Serial.printf("ZIP: ps_malloc(%u) failed for compressed payload\n",
+                              entry.compressed_size);
+                return nullptr;
+            }
+            if (fread(compressed, 1, entry.compressed_size, _f) != entry.compressed_size) {
+                free(compressed);
+                return nullptr;
+            }
+
+            uint8_t* data = (uint8_t*)ps_malloc(entry.uncompressed_size + 1);
+            if (!data) { free(compressed); return nullptr; }
+
+            z_stream strm;
+            memset(&strm, 0, sizeof(strm));
+            strm.next_in   = compressed;
+            strm.avail_in  = entry.compressed_size;
+            strm.next_out  = data;
+            strm.avail_out = entry.uncompressed_size;
+
+            if (inflateInit2(&strm, -MAX_WBITS) != Z_OK) {
+                free(compressed); free(data); return nullptr;
+            }
+            int ret = inflate(&strm, Z_FINISH);
+            inflateEnd(&strm);
+            free(compressed);
+
+            if (ret != Z_STREAM_END && ret != Z_OK) {
+                free(data);
+                return nullptr;
+            }
+
+            data[entry.uncompressed_size] = 0;
+            *outSize = entry.uncompressed_size;
+            return data;
+        }
+        break;
+    }
+    return nullptr;
+}
+
+bool ZipReader::extractFileTo(const char* name, const char* outPath, size_t* outSize) {
+    if (outSize) *outSize = 0;
+    if (!_f || !name || !outPath) return false;
+
+    for (const auto& entry : _entries) {
+        if (entry.name != name) continue;
+        if (!zipSeekToData(_f, entry)) return false;
+
+        File out = SD.open(outPath, FILE_WRITE);
+        if (!out || out.isDirectory()) {
+            if (out) out.close();
+            return false;
+        }
+
+        bool ok = false;
+        if (entry.compression_method == 0) {
+            uint8_t buf[1024];
+            uint32_t remaining = entry.uncompressed_size;
+            ok = true;
+            while (remaining > 0) {
+                size_t want = remaining > sizeof(buf) ? sizeof(buf) : remaining;
+                size_t n = fread(buf, 1, want, _f);
+                if (n != want || out.write(buf, n) != n) { ok = false; break; }
+                remaining -= n;
+                yield();
+            }
+        } else if (entry.compression_method == 8) {
+            uint8_t inBuf[1024];
+            uint8_t outBuf[1024];
+            z_stream strm;
+            memset(&strm, 0, sizeof(strm));
+            ok = inflateInit2(&strm, -MAX_WBITS) == Z_OK;
+            uint32_t compressedRemaining = entry.compressed_size;
+
+            while (ok) {
+                if (strm.avail_in == 0 && compressedRemaining > 0) {
+                    size_t want = compressedRemaining > sizeof(inBuf) ? sizeof(inBuf) : compressedRemaining;
+                    size_t n = fread(inBuf, 1, want, _f);
+                    if (n != want) { ok = false; break; }
+                    compressedRemaining -= n;
+                    strm.next_in = inBuf;
+                    strm.avail_in = n;
+                }
+
+                strm.next_out = outBuf;
+                strm.avail_out = sizeof(outBuf);
+                int ret = inflate(&strm, compressedRemaining == 0 ? Z_FINISH : Z_NO_FLUSH);
+                size_t produced = sizeof(outBuf) - strm.avail_out;
+                if (produced && out.write(outBuf, produced) != produced) { ok = false; break; }
+                if (ret == Z_STREAM_END) break;
+                if (ret != Z_OK) { ok = false; break; }
+                yield();
+            }
+            inflateEnd(&strm);
+        }
+
+        size_t finalSize = out.size();
+        out.close();
+        if (!ok || finalSize != entry.uncompressed_size) {
+            SD.remove(outPath);
+            return false;
+        }
+        if (outSize) *outSize = finalSize;
+        return true;
+    }
+    return false;
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// Simple XML helpers (no dependency on tinyxml2)
+// ═══════════════════════════════════════════════════════════════════
+
+// Find attribute value: <...tag... attr="value"...>
+static String xmlAttr(const char* xml, const char* tag, const char* attr) {
+    const char* p = xml;
+    while ((p = strstr(p, tag)) != nullptr) {
+        const char* tagEnd = strchr(p, '>');
+        if (!tagEnd) { p++; continue; }
+
+        String attrSearch = String(attr) + "=\"";
+        const char* a = strstr(p, attrSearch.c_str());
+        if (a && a < tagEnd) {
+            a += attrSearch.length();
+            const char* end = strchr(a, '"');
+            if (end && end < tagEnd + 1) {
+                return String(a, end - a);
+            }
+        }
+        p = tagEnd;
+    }
+    return "";
+}
+
+// Find text between <tag>...</tag>
+static String xmlText(const char* xml, const char* tag) {
+    String openTag = String("<") + tag;
+    const char* p = strstr(xml, openTag.c_str());
+    if (!p) return "";
+    const char* start = strchr(p, '>');
+    if (!start) return "";
+    start++;
+    String closeTag = String("</") + tag + ">";
+    const char* end = strstr(start, closeTag.c_str());
+    if (!end) return "";
+    return String(start, end - start);
+}
+
+
+// ═══════════════════════════════════════════════════════════════════
+// EpubParser
+// ═══════════════════════════════════════════════════════════════════
+
+bool EpubParser::open(const char* filepath) {
+    close();
+    if (!_zip.open(filepath)) return false;
+    if (!parseContainer()) { close(); return false; }
+    return true;
+}
+
+void EpubParser::close() {
+    _zip.close();
+    _title = "";
+    _author = "";
+    _basePath = "";
+    _spine.clear();
+    _manifest.clear();
+    _toc.clear();
+    _coverImagePath = "";
+    _chapterTitleCache.clear();
+}
+
+bool EpubParser::parseContainer() {
+    size_t size;
+    uint8_t* data = _zip.readFile("META-INF/container.xml", &size);
+    if (!data) {
+        Serial.println("EPUB: cannot read container.xml");
+        return false;
+    }
+
+    String opfPath = xmlAttr((const char*)data, "rootfile", "full-path");
+    free(data);
+
+    if (opfPath.length() == 0) {
+        Serial.println("EPUB: no rootfile in container.xml");
+        return false;
+    }
+
+    Serial.printf("EPUB: content.opf at %s\n", opfPath.c_str());
+    return parseContentOpf(opfPath.c_str());
+}
+
+bool EpubParser::parseContentOpf(const char* opfPath) {
+    size_t size;
+    uint8_t* data = _zip.readFile(opfPath, &size);
+    if (!data) {
+        Serial.printf("EPUB: cannot read %s\n", opfPath);
+        return false;
+    }
+
+    // Extract base path (directory of OPF file)
+    _basePath = String(opfPath);
+    int lastSlash = _basePath.lastIndexOf('/');
+    if (lastSlash >= 0) {
+        _basePath = _basePath.substring(0, lastSlash + 1);
+    } else {
+        _basePath = "";
+    }
+
+    const char* xml = (const char*)data;
+
+    // Extract title — try both dc:title and title
+    _title = xmlText(xml, "dc:title");
+    if (_title.length() == 0) {
+        _title = xmlText(xml, "title");
+    }
+    if (_title.length() == 0) {
+        _title = "Untitled";
+    }
+
+    _author = xmlText(xml, "dc:creator");
+    if (_author.length() == 0) {
+        _author = xmlText(xml, "creator");
+    }
+    _author = stripTagsAndTrim(_author);
+
+    Serial.printf("EPUB: title = %s\n", _title.c_str());
+
+    // Build manifest and detect cover image metadata.
+    _manifest.clear();
+    _toc.clear();
+    _coverImagePath = "";
+    String coverId;
+    String navDocPath;
+    String ncxPath;
+
+    const char* p = xml;
+    while ((p = strstr(p, "<meta")) != nullptr) {
+        const char* metaEnd = strchr(p, '>');
+        if (!metaEnd) break;
+
+        const char* namePos = strstr(p, "name=\"");
+        const char* contentPos = strstr(p, "content=\"");
+        if (namePos && contentPos && namePos < metaEnd && contentPos < metaEnd) {
+            namePos += 6;
+            const char* nameEnd = strchr(namePos, '"');
+            contentPos += 9;
+            const char* contentEnd = strchr(contentPos, '"');
+            if (nameEnd && contentEnd && nameEnd <= metaEnd && contentEnd <= metaEnd) {
+                String name = String(namePos, nameEnd - namePos);
+                if (name == "cover") {
+                    coverId = String(contentPos, contentEnd - contentPos);
+                }
+            }
+        }
+        p = metaEnd + 1;
+    }
+
+    p = xml;
+    while ((p = strstr(p, "<item ")) != nullptr) {
+        const char* itemEnd = strchr(p, '>');
+        if (!itemEnd) break;
+
+        // Extract id/href/media metadata from this <item> tag
+        String id, href, mediaType, properties;
+        const char* scan = p;
+
+        // Extract id
+        const char* idPos = strstr(scan, "id=\"");
+        if (idPos && idPos < itemEnd) {
+            idPos += 4;
+            const char* idEnd = strchr(idPos, '"');
+            if (idEnd) id = String(idPos, idEnd - idPos);
+        }
+
+        // Extract href
+        const char* hrefPos = strstr(scan, "href=\"");
+        if (hrefPos && hrefPos < itemEnd) {
+            hrefPos += 6;
+            const char* hrefEnd = strchr(hrefPos, '"');
+            if (hrefEnd) href = String(hrefPos, hrefEnd - hrefPos);
+        }
+
+        const char* mediaPos = strstr(scan, "media-type=\"");
+        if (mediaPos && mediaPos < itemEnd) {
+            mediaPos += 12;
+            const char* mediaEnd = strchr(mediaPos, '"');
+            if (mediaEnd) mediaType = String(mediaPos, mediaEnd - mediaPos);
+        }
+
+        const char* propsPos = strstr(scan, "properties=\"");
+        if (propsPos && propsPos < itemEnd) {
+            propsPos += 12;
+            const char* propsEnd = strchr(propsPos, '"');
+            if (propsEnd) properties = String(propsPos, propsEnd - propsPos);
+        }
+
+        if (id.length() > 0 && href.length() > 0) {
+            ManifestItem item;
+            item.id = id;
+            item.href = _basePath + href;
+            item.mediaType = mediaType;
+            item.properties = properties;
+            _manifest.push_back(item);
+
+            String hrefLower = href;
+            hrefLower.toLowerCase();
+            bool isImage = mediaType == "image/jpeg" || mediaType == "image/jpg" || mediaType == "image/png";
+            String propsLower = properties;
+            propsLower.toLowerCase();
+            if (_coverImagePath.length() == 0) {
+                if ((properties.indexOf("cover-image") >= 0 && isImage) ||
+                    (coverId.length() > 0 && id == coverId) ||
+                    (isImage && hrefLower.indexOf("cover") >= 0)) {
+                    _coverImagePath = item.href;
+                }
+            }
+
+            if (navDocPath.length() == 0 && propsLower.indexOf("nav") >= 0) {
+                navDocPath = item.href;
+            }
+            if (ncxPath.length() == 0 && (mediaType == "application/x-dtbncx+xml" || hrefLower.endsWith(".ncx"))) {
+                ncxPath = item.href;
+            }
+        }
+
+        p = itemEnd + 1;
+    }
+
+    // Parse spine — <itemref idref="..."/>
+    p = strstr(xml, "<spine");
+    if (!p) { free(data); return false; }
+
+    while ((p = strstr(p, "<itemref")) != nullptr) {
+        String idref = xmlAttr(p, "itemref", "idref");
+        if (idref.length() > 0) {
+            // Find in manifest
+            for (const auto& mi : _manifest) {
+                if (mi.id == idref) {
+                    SpineItem si;
+                    si.id = mi.id;
+                    si.href = mi.href;
+                    _spine.push_back(si);
+                    break;
+                }
+            }
+        }
+        p++;
+    }
+
+    if (_coverImagePath.length() == 0) {
+        const char* guide = strstr(xml, "<guide");
+        if (guide) {
+            const char* gp = guide;
+            while ((gp = strstr(gp, "<reference")) != nullptr) {
+                const char* refEnd = strchr(gp, '>');
+                if (!refEnd) break;
+                String type = xmlAttr(gp, "reference", "type");
+                String href = xmlAttr(gp, "reference", "href");
+                type.toLowerCase();
+                if (type.indexOf("cover") >= 0 && href.length() > 0) {
+                    _coverImagePath = resolveRelativePath(_basePath, href);
+                    break;
+                }
+                gp = refEnd + 1;
+            }
+        }
+    }
+
+    free(data);
+    Serial.printf("EPUB: %d chapters in spine\n", _spine.size());
+    _chapterTitleCache.assign(_spine.size(), String());
+
+    // Try semantic TOC first (EPUB3 nav document, then EPUB2 NCX).
+    // Fall back to spine-derived TOC only if both fail.
+    // WDT-safe: stripHtml/decodeEntities now yield() periodically.
+    bool haveToc = false;
+    if (navDocPath.length() > 0) {
+        haveToc = parseNavigationDocument(navDocPath);
+        if (haveToc) {
+            Serial.printf("EPUB: parsed nav document TOC (%d entries)\n", (int)_toc.size());
+        }
+    }
+    if (!haveToc && ncxPath.length() > 0) {
+        haveToc = parseNcx(ncxPath);
+        if (haveToc) {
+            Serial.printf("EPUB: parsed NCX TOC (%d entries)\n", (int)_toc.size());
+        }
+    }
+    if (!haveToc) {
+        buildSpineFallbackToc();
+        Serial.printf("EPUB: using spine fallback TOC (%d entries)\n", (int)_toc.size());
+    }
+
+    // Manifest is only needed during OPF parsing to resolve spine hrefs.
+    // Free it now to reclaim heap (72 items × 4 Strings each ≈ 15-20KB).
+    _manifest.clear();
+    _manifest.shrink_to_fit();
+
+    Serial.printf("EPUB: open complete (heap: %d)\n", (int)ESP.getFreeHeap());
+    return _spine.size() > 0;
+}
+
+static String stripFragment(const String& href) {
+    int hash = href.indexOf('#');
+    if (hash >= 0) return href.substring(0, hash);
+    return href;
+}
+
+static String stripTagsAndTrim(const String& html) {
+    String out;
+    bool inTag = false;
+    for (int i = 0; i < (int)html.length(); i++) {
+        char c = html[i];
+        if (c == '<') { inTag = true; continue; }
+        if (c == '>') { inTag = false; continue; }
+        if (!inTag) out += c;
+    }
+    out.trim();
+    return decodeEntities(out);
+}
+
+int EpubParser::findSpineIndexForHref(const String& href) const {
+    String target = stripFragment(resolveRelativePath(_basePath, href));
+    for (int i = 0; i < (int)_spine.size(); i++) {
+        if (stripFragment(_spine[i].href) == target) return i;
+    }
+    return -1;
+}
+
+void EpubParser::buildSpineFallbackToc() {
+    _toc.clear();
+    for (int i = 0; i < (int)_spine.size(); i++) {
+        TocEntry e;
+        e.chapterIndex = i;
+        e.href = _spine[i].href;
+        // Use cached title if already available; otherwise use a cheap
+        // placeholder.  Titles are loaded lazily via getChapterTitle()
+        // when the TOC screen is actually displayed, avoiding 72 ZIP
+        // reads during book open that consumed ~60 KB of heap.
+        if (i < (int)_chapterTitleCache.size() && _chapterTitleCache[i].length() > 0) {
+            e.label = _chapterTitleCache[i];
+        } else {
+            e.label = String("Section ") + String(i + 1);
+        }
+        _toc.push_back(e);
+    }
+}
+
+bool EpubParser::parseNavigationDocument(const String& navPath) {
+    size_t size = 0;
+    uint8_t* data = _zip.readFile(navPath.c_str(), &size);
+    if (!data) return false;
+
+    String html = String((const char*)data);
+    free(data);
+
+    String lower = html;
+    lower.toLowerCase();
+    int navStart = lower.indexOf("epub:type=\"toc\"");
+    if (navStart < 0) navStart = lower.indexOf("type=\"toc\"");
+    if (navStart < 0) navStart = lower.indexOf("<nav");
+    if (navStart < 0) return false;
+
+    int navTagStart = lower.lastIndexOf("<nav", navStart);
+    if (navTagStart >= 0) navStart = navTagStart;
+    int navEnd = lower.indexOf("</nav>", navStart);
+    if (navEnd < 0) return false;
+
+    String navHtml = html.substring(navStart, navEnd);
+    int pos = 0;
+    int added = 0;
+    while (true) {
+        int aStart = navHtml.indexOf("<a", pos);
+        if (aStart < 0) break;
+        int tagEnd = navHtml.indexOf('>', aStart);
+        if (tagEnd < 0) break;
+        int close = navHtml.indexOf("</a>", tagEnd);
+        if (close < 0) break;
+
+        String tag = navHtml.substring(aStart, tagEnd + 1);
+        String href = xmlAttr(tag.c_str(), "a", "href");
+        String label = stripTagsAndTrim(navHtml.substring(tagEnd + 1, close));
+        int chapterIndex = findSpineIndexForHref(resolveRelativePath(navPath.substring(0, navPath.lastIndexOf('/') + 1), href));
+        if (href.length() > 0 && label.length() > 0 && chapterIndex >= 0) {
+            TocEntry e;
+            e.label = label;
+            e.href = href;
+            e.chapterIndex = chapterIndex;
+            bool dup = false;
+            for (const auto& existing : _toc) {
+                if (existing.chapterIndex == e.chapterIndex && existing.label == e.label) { dup = true; break; }
+            }
+            if (!dup) {
+                _toc.push_back(e);
+                added++;
+            }
+        }
+        pos = close + 4;
+    }
+
+    return added > 0;
+}
+
+bool EpubParser::parseNcx(const String& ncxPath) {
+    size_t size = 0;
+    uint8_t* data = _zip.readFile(ncxPath.c_str(), &size);
+    if (!data) return false;
+
+    String xml = String((const char*)data);
+    free(data);
+
+    int pos = 0;
+    int added = 0;
+    while (true) {
+        yield();  // Prevent WDT on books with many navPoints
+        int npStart = xml.indexOf("<navPoint", pos);
+        if (npStart < 0) break;
+        int npEnd = xml.indexOf("</navPoint>", npStart);
+        if (npEnd < 0) break;
+        String block = xml.substring(npStart, npEnd);
+        String label = xmlText(block.c_str(), "text");
+        String href = xmlAttr(block.c_str(), "content", "src");
+        label.trim();
+        int chapterIndex = findSpineIndexForHref(resolveRelativePath(ncxPath.substring(0, ncxPath.lastIndexOf('/') + 1), href));
+        if (href.length() > 0 && label.length() > 0 && chapterIndex >= 0) {
+            TocEntry e;
+            e.label = label;
+            e.href = href;
+            e.chapterIndex = chapterIndex;
+            bool dup = false;
+            for (const auto& existing : _toc) {
+                if (existing.chapterIndex == e.chapterIndex && existing.label == e.label) { dup = true; break; }
+            }
+            if (!dup) {
+                _toc.push_back(e);
+                added++;
+            }
+        }
+        pos = npEnd + 11;
+    }
+
+    return added > 0;
+}
+
+String EpubParser::getTocLabel(int index) const {
+    if (index < 0 || index >= (int)_toc.size()) return "";
+    return _toc[index].label;
+}
+
+int EpubParser::getTocChapterIndex(int index) const {
+    if (index < 0 || index >= (int)_toc.size()) return -1;
+    return _toc[index].chapterIndex;
+}
+
+String EpubParser::resolveRelativePath(const String& base, const String& relative) const {
+    if (relative.startsWith("/")) return relative;
+    String result = base + relative;
+    // Resolve ".." components
+    while (true) {
+        int dotdot = result.indexOf("/..");
+        if (dotdot < 0) break;
+        int prevSlash = result.lastIndexOf('/', dotdot - 1);
+        if (prevSlash < 0) break;
+        result = result.substring(0, prevSlash) + result.substring(dotdot + 3);
+    }
+    return result;
+}
+
+String EpubParser::getChapterText(int index) {
+    if (index < 0 || index >= (int)_spine.size()) return "";
+
+    Serial.printf("EPUB: reading chapter %d: %s (heap: %d)\n",
+                  index, _spine[index].href.c_str(), (int)ESP.getFreeHeap());
+    yield();
+
+    size_t size;
+    uint8_t* data = _zip.readFile(_spine[index].href.c_str(), &size);
+    if (!data) {
+        Serial.printf("EPUB: cannot read chapter %s\n", _spine[index].href.c_str());
+        return "";
+    }
+
+    Serial.printf("EPUB: decompressed %d bytes, stripping HTML (heap: %d)\n",
+                  (int)size, (int)ESP.getFreeHeap());
+    yield();
+
+    String text = stripHtml((const char*)data, size);
+    free(data);
+
+    Serial.printf("EPUB: stripped to %d chars (heap: %d)\n",
+                  (int)text.length(), (int)ESP.getFreeHeap());
+
+    // Resolve relative image paths in \x01IMG|path\x01 markers to absolute ZIP paths
+    if (text.indexOf('\x01') >= 0) {
+        String resolved;
+        resolved.reserve(text.length() + 128);
+        int pos = 0;
+        int tlen = text.length();
+        while (pos < tlen) {
+            if (text[pos] == '\x01' && pos + 5 < tlen && text.substring(pos + 1, pos + 5) == "IMG|") {
+                int end = text.indexOf('\x01', pos + 5);
+                if (end > pos) {
+                    String relPath = text.substring(pos + 5, end);
+                    String absPath = resolveChapterAssetPath(index, relPath);
+                    resolved += '\x01';
+                    resolved += "IMG|";
+                    resolved += absPath;
+                    resolved += '\x01';
+                    pos = end + 1;
+                    continue;
+                }
+            }
+            resolved += text[pos];
+            pos++;
+        }
+        return resolved;
+    }
+    return text;
+}
+
+String EpubParser::getChapterHtml(int index) {
+    if (index < 0 || index >= (int)_spine.size()) return "";
+
+    size_t size;
+    uint8_t* data = _zip.readFile(_spine[index].href.c_str(), &size);
+    if (!data) return "";
+
+    String html = String((const char*)data);
+    free(data);
+    return html;
+}
+
+uint8_t* EpubParser::readAsset(const String& zipPath, size_t* outSize) {
+    return _zip.readFile(zipPath.c_str(), outSize);
+}
+
+bool EpubParser::extractAssetToFile(const String& zipPath, const String& outPath, size_t* outSize) {
+    return _zip.extractFileTo(zipPath.c_str(), outPath.c_str(), outSize);
+}
+
+String EpubParser::getAssetSignature(const String& zipPath) {
+    uint32_t crc32 = 0, compressedSize = 0, uncompressedSize = 0;
+    uint16_t compressionMethod = 0;
+    if (!_zip.getFileSignature(zipPath.c_str(), crc32, compressedSize, uncompressedSize, compressionMethod)) return "";
+    return String(crc32, HEX) + ":" + String(compressedSize, HEX) + ":" +
+           String(uncompressedSize, HEX) + ":" + String(compressionMethod, HEX);
+}
+
+String EpubParser::resolveChapterAssetPath(int chapterIndex, const String& relativePath) {
+    if (chapterIndex < 0 || chapterIndex >= (int)_spine.size()) return relativePath;
+    String chapterPath = _spine[chapterIndex].href;
+    int lastSlash = chapterPath.lastIndexOf('/');
+    String chapterBase = (lastSlash >= 0) ? chapterPath.substring(0, lastSlash + 1) : "";
+    return resolveRelativePath(chapterBase, relativePath);
+}
+
+String EpubParser::getChapterTitle(int index) {
+    if (index < 0 || index >= (int)_spine.size()) return "";
+
+    if (index < (int)_chapterTitleCache.size() && _chapterTitleCache[index].length() > 0) {
+        return _chapterTitleCache[index];
+    }
+
+    size_t size;
+    uint8_t* data = _zip.readFile(_spine[index].href.c_str(), &size);
+    if (!data) {
+        String fallback = String("Chapter ") + String(index + 1);
+        if (index < (int)_chapterTitleCache.size()) _chapterTitleCache[index] = fallback;
+        return fallback;
+    }
+
+    const char* html = (const char*)data;
+
+    // Try <title> tag first
+    String title = xmlText(html, "title");
+    if (title.length() > 0) {
+        title.trim();
+        if (title.length() > 0 && title != "Untitled") {
+            free(data);
+            if (index < (int)_chapterTitleCache.size()) _chapterTitleCache[index] = title;
+            return title;
+        }
+    }
+
+    // Try <h1>, <h2>, <h3>
+    const char* hTags[] = {"h1", "h2", "h3"};
+    for (const char* tag : hTags) {
+        title = xmlText(html, tag);
+        if (title.length() > 0) {
+            // Strip any inner HTML tags from the heading
+            String clean;
+            bool inTag = false;
+            for (int i = 0; i < (int)title.length(); i++) {
+                if (title[i] == '<') inTag = true;
+                else if (title[i] == '>') inTag = false;
+                else if (!inTag) clean += title[i];
+            }
+            clean.trim();
+            if (clean.length() > 0) {
+                free(data);
+                if (index < (int)_chapterTitleCache.size()) _chapterTitleCache[index] = clean;
+                return clean;
+            }
+        }
+    }
+
+    free(data);
+
+    // Fall back to spine ID
+    String fallback = _spine[index].id.length() > 0 ? _spine[index].id : String("Chapter ") + String(index + 1);
+    if (index < (int)_chapterTitleCache.size()) _chapterTitleCache[index] = fallback;
+    return fallback;
+}
+
+void EpubParser::setChapterTitleCache(const std::vector<String>& titles) {
+    // Inject persisted chapter titles into the in-memory cache, preventing ZIP
+    // reads for titles that were already extracted on a previous open.
+    int n = min((int)titles.size(), (int)_chapterTitleCache.size());
+    for (int i = 0; i < n; i++) {
+        if (titles[i].length() > 0) {
+            _chapterTitleCache[i] = titles[i];
+        }
+    }
+}
+
+// Check if a tag name is a block-level element that should produce a line break
+static bool isBlockTag(const String& tag) {
+    return tag == "p" || tag == "/p" ||
+           tag == "div" || tag == "/div" ||
+           tag == "br" || tag == "br/" ||
+           tag == "li" || tag == "/li" ||
+           tag == "tr" || tag == "/tr" ||
+           tag == "blockquote" || tag == "/blockquote" ||
+           tag == "section" || tag == "/section" ||
+           tag == "article" || tag == "/article" ||
+           tag == "aside" || tag == "/aside" ||
+           tag == "header" || tag == "/header" ||
+           tag == "footer" || tag == "/footer" ||
+           tag == "figcaption" || tag == "/figcaption" ||
+           tag == "ol" || tag == "/ol" ||
+           tag == "ul" || tag == "/ul" ||
+           tag == "dl" || tag == "/dl" ||
+           tag == "dt" || tag == "/dt" ||
+           tag == "dd" || tag == "/dd" ||
+           tag == "pre" || tag == "/pre" ||
+           tag.startsWith("h") || tag.startsWith("/h");
+}
+
+// Decode a single numeric HTML entity (&#NNN; or &#xHH;) to UTF-8
+static String decodeNumericEntity(const String& entity) {
+    uint32_t codepoint = 0;
+    if (entity.startsWith("&#x") || entity.startsWith("&#X")) {
+        codepoint = strtoul(entity.c_str() + 3, nullptr, 16);
+    } else if (entity.startsWith("&#")) {
+        codepoint = strtoul(entity.c_str() + 2, nullptr, 10);
+    }
+
+    if (codepoint == 0) return "?";
+
+    // Common typographic characters → ASCII equivalents for e-paper readability
+    switch (codepoint) {
+        case 160:   return " ";    // &nbsp;
+        case 173:   return "";     // soft hyphen
+        case 8194:  // en space
+        case 8195:  // em space
+        case 8201:  return " ";    // thin space
+        case 8211:  return " - ";  // en dash
+        case 8212:  return " -- "; // em dash
+        case 8216:  return "'";    // left single quote
+        case 8217:  return "'";    // right single quote
+        case 8218:  return ",";    // single low-9 quote
+        case 8220:  return "\"";   // left double quote
+        case 8221:  return "\"";   // right double quote
+        case 8222:  return "\"";   // double low-9 quote
+        case 8226:  return "* ";   // bullet
+        case 8230:  return "...";  // ellipsis
+        case 8242:  return "'";    // prime
+        case 8243:  return "\"";   // double prime
+        case 8249:  return "<";    // single left angle quote
+        case 8250:  return ">";    // single right angle quote
+        case 8260:  return "/";    // fraction slash
+        case 8364:  return "EUR "; // euro sign
+    }
+
+    // Encode to UTF-8 for characters the font may support
+    char buf[5];
+    if (codepoint < 0x80) {
+        buf[0] = (char)codepoint; buf[1] = 0;
+    } else if (codepoint < 0x800) {
+        buf[0] = 0xC0 | (codepoint >> 6);
+        buf[1] = 0x80 | (codepoint & 0x3F);
+        buf[2] = 0;
+    } else if (codepoint < 0x10000) {
+        buf[0] = 0xE0 | (codepoint >> 12);
+        buf[1] = 0x80 | ((codepoint >> 6) & 0x3F);
+        buf[2] = 0x80 | (codepoint & 0x3F);
+        buf[3] = 0;
+    } else {
+        buf[0] = 0xF0 | (codepoint >> 18);
+        buf[1] = 0x80 | ((codepoint >> 12) & 0x3F);
+        buf[2] = 0x80 | ((codepoint >> 6) & 0x3F);
+        buf[3] = 0x80 | (codepoint & 0x3F);
+        buf[4] = 0;
+    }
+    return String(buf);
+}
+
+static int hexValue(char c) {
+    if (c >= '0' && c <= '9') return c - '0';
+    if (c >= 'a' && c <= 'f') return 10 + c - 'a';
+    if (c >= 'A' && c <= 'F') return 10 + c - 'A';
+    return -1;
+}
+
+static String urlDecodePathComponent(const String& input) {
+    String out;
+    out.reserve(input.length());
+    for (int i = 0; i < (int)input.length(); i++) {
+        char c = input[i];
+        if (c == '%' && i + 2 < (int)input.length()) {
+            int hi = hexValue(input[i + 1]);
+            int lo = hexValue(input[i + 2]);
+            if (hi >= 0 && lo >= 0) {
+                out += (char)((hi << 4) | lo);
+                i += 2;
+                continue;
+            }
+        }
+        out += c;
+    }
+    return out;
+}
+
+static bool isAttrNameChar(char c) {
+    return isalnum((unsigned char)c) || c == '_' || c == '-' || c == ':';
+}
+
+static bool extractImageAttr(const String& tagContent, String& outSrc) {
+    outSrc = "";
+    int i = 0;
+    int len = tagContent.length();
+    while (i < len) {
+        while (i < len && !isAttrNameChar(tagContent[i])) i++;
+        int nameStart = i;
+        while (i < len && isAttrNameChar(tagContent[i])) i++;
+        if (i <= nameStart) break;
+
+        String name = tagContent.substring(nameStart, i);
+        name.toLowerCase();
+        while (i < len && isspace((unsigned char)tagContent[i])) i++;
+
+        String value;
+        if (i < len && tagContent[i] == '=') {
+            i++;
+            while (i < len && isspace((unsigned char)tagContent[i])) i++;
+            if (i < len && (tagContent[i] == '"' || tagContent[i] == '\'')) {
+                char quote = tagContent[i++];
+                int valueStart = i;
+                while (i < len && tagContent[i] != quote) i++;
+                value = tagContent.substring(valueStart, i);
+                if (i < len && tagContent[i] == quote) i++;
+            } else {
+                int valueStart = i;
+                while (i < len && !isspace((unsigned char)tagContent[i]) && tagContent[i] != '>') i++;
+                value = tagContent.substring(valueStart, i);
+            }
+        }
+
+        if (name == "src" || name == "href" || name == "xlink:href") {
+            int hash = value.indexOf('#');
+            int query = value.indexOf('?');
+            int cut = -1;
+            if (hash >= 0 && query >= 0) cut = min(hash, query);
+            else if (hash >= 0) cut = hash;
+            else if (query >= 0) cut = query;
+            if (cut >= 0) value = value.substring(0, cut);
+            value = decodeEntities(value);
+            value = urlDecodePathComponent(value);
+            value.trim();
+            if (value.length() > 0) {
+                outSrc = value;
+                return true;
+            }
+        }
+    }
+    return false;
+}
+
+// Decode all HTML entities in a string (named + numeric)
+static String decodeEntities(const String& input) {
+    String result;
+    result.reserve(input.length());
+
+    int i = 0;
+    int len = input.length();
+    unsigned long lastYieldMs = millis();
+    while (i < len) {
+        // Yield every 50ms to prevent watchdog timeout on large chapters
+        unsigned long nowMs = millis();
+        if (nowMs - lastYieldMs >= 50) {
+            yield();
+            lastYieldMs = nowMs;
+        }
+
+        if (input[i] == '&') {
+            int semi = input.indexOf(';', i + 1);
+            if (semi > i && semi - i < 12) {
+                String entity = input.substring(i, semi + 1);
+                String lower = entity;
+                lower.toLowerCase();
+
+                // Named entities
+                if (lower == "&amp;")    { result += '&';  i = semi + 1; continue; }
+                if (lower == "&lt;")     { result += '<';  i = semi + 1; continue; }
+                if (lower == "&gt;")     { result += '>';  i = semi + 1; continue; }
+                if (lower == "&quot;")   { result += '"';  i = semi + 1; continue; }
+                if (lower == "&apos;")   { result += '\''; i = semi + 1; continue; }
+                if (lower == "&nbsp;")   { result += ' ';  i = semi + 1; continue; }
+                if (lower == "&mdash;")  { result += " -- "; i = semi + 1; continue; }
+                if (lower == "&ndash;")  { result += " - ";  i = semi + 1; continue; }
+                if (lower == "&lsquo;")  { result += '\''; i = semi + 1; continue; }
+                if (lower == "&rsquo;")  { result += '\''; i = semi + 1; continue; }
+                if (lower == "&ldquo;")  { result += '"';  i = semi + 1; continue; }
+                if (lower == "&rdquo;")  { result += '"';  i = semi + 1; continue; }
+                if (lower == "&hellip;") { result += "..."; i = semi + 1; continue; }
+                if (lower == "&bull;")   { result += "* ";  i = semi + 1; continue; }
+                if (lower == "&trade;")  { result += "(TM)"; i = semi + 1; continue; }
+                if (lower == "&copy;")   { result += "(c)";  i = semi + 1; continue; }
+                if (lower == "&reg;")    { result += "(R)";  i = semi + 1; continue; }
+                if (lower == "&deg;")    { result += "deg";  i = semi + 1; continue; }
+                if (lower == "&shy;")    { result += "";     i = semi + 1; continue; }
+
+                // Numeric entities
+                if (entity.startsWith("&#")) {
+                    result += decodeNumericEntity(entity);
+                    i = semi + 1;
+                    continue;
+                }
+
+                // Unknown named entity — pass through as-is
+            }
+        }
+        result += input[i];
+        i++;
+    }
+    return result;
+}
+
+String EpubParser::stripHtml(const char* html, size_t len) {
+    String result;
+    result.reserve(len / 2);
+
+    bool inTag = false;
+    bool inScript = false;
+    bool inStyle = false;
+    bool inHead = false;
+    bool collectingTag = false;
+    bool isImgTag = false;     // only buffer tag content for img/image tags
+    String tagName;
+    String tagContent;
+    unsigned long lastYieldMs = millis();
+
+    for (size_t i = 0; i < len && html[i]; i++) {
+        // Yield every 50ms to prevent watchdog timeout on large chapters
+        if ((i & 0x3FF) == 0) {
+            unsigned long nowMs = millis();
+            if (nowMs - lastYieldMs >= 50) {
+                yield();
+                lastYieldMs = nowMs;
+            }
+        }
+
+        char c = html[i];
+
+        if (c == '<') {
+            inTag = true;
+            tagName = "";
+            tagContent = "";
+            collectingTag = true;
+            isImgTag = false;
+            continue;
+        }
+
+        if (c == '>') {
+            inTag = false;
+            collectingTag = false;
+            tagName.toLowerCase();
+
+            // Detect <img> and <image> tags — extract src and emit marker
+            if (tagName == "img" || tagName == "image") {
+                // Extract src="..." from buffered tag content
+                // Scan raw HTML from tag start to find src= or href= attribute
+                String src;
+                extractImageAttr(tagContent, src);
+                if (src.length() > 0) {
+                    if (result.length() > 0 && result[result.length()-1] != '\n')
+                        result += '\n';
+                    result += '\x01';
+                    result += "IMG|";
+                    result += src;
+                    result += '\x01';
+                    result += '\n';
+                }
+            }
+
+            // Skip script/style/head content
+            if (tagName == "script") inScript = true;
+            if (tagName == "/script") inScript = false;
+            if (tagName == "style") inStyle = true;
+            if (tagName == "/style") inStyle = false;
+            if (tagName == "head") inHead = true;
+            if (tagName == "/head") inHead = false;
+
+            // Block elements → newline
+            if (isBlockTag(tagName)) {
+                if (result.length() > 0 && result[result.length()-1] != '\n') {
+                    result += '\n';
+                }
+            }
+            continue;
+        }
+
+        if (inTag) {
+            // Allow '/' only as first char (closing-tag marker); after name started, '/' ends name.
+            bool keepCollecting = collectingTag && c != ' ' && c != '\n' && c != '\r' &&
+                                  !(c == '/' && tagName.length() > 0);
+            if (keepCollecting) {
+                tagName += c;
+            } else {
+                if (collectingTag) {
+                    // Tag name complete — check if it's an img tag
+                    collectingTag = false;
+                    String lowerTag = tagName;
+                    lowerTag.toLowerCase();
+                    isImgTag = (lowerTag == "img" || lowerTag == "image");
+                }
+                // Only buffer tag content for img/image tags to save memory
+                if (isImgTag) {
+                    tagContent += c;
+                }
+            }
+            continue;
+        }
+
+        if (inScript || inStyle || inHead) continue;
+
+        // Collapse whitespace
+        if (c == '\r') continue;
+        if (c == '\n' || c == '\t') c = ' ';
+        if (c == ' ' && result.length() > 0 && result[result.length()-1] == ' ') continue;
+
+        result += c;
+    }
+
+    // Decode all HTML entities (named + numeric, including UTF-8)
+    result = decodeEntities(result);
+
+    // Trim leading/trailing whitespace
+    result.trim();
+    return result;
+}

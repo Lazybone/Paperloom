@@ -1,0 +1,139 @@
+#pragma once
+
+// ─── Firmware Version ──────────────────────────────────────────────
+#ifndef FIRMWARE_VERSION
+#define FIRMWARE_VERSION "0.2.0"
+#endif
+
+// ─── WiFi Credentials ───────────────────────────────────────────────
+// Template file — `include/config.h` is gitignored.  Copy this file to
+// `include/config.h` on a fresh checkout and replace the placeholders
+// below with real values before flashing.
+// WiFi is used for the wireless book upload feature.
+#define WIFI_SSID "your-wifi-ssid"
+#define WIFI_PASS "your-wifi-password"
+
+// ─── Display (ED047TC1 via epdiy on T5S3 PRO) ───────────────────────
+// Physical: 960x540 landscape. We render portrait (540x960) and rotate.
+#define PHYS_WIDTH   960
+#define PHYS_HEIGHT  540
+#define PORTRAIT_W   540
+#define PORTRAIT_H   960
+
+// Legacy aliases — all UI code uses portrait dimensions
+#define DISPLAY_WIDTH  PORTRAIT_W
+#define DISPLAY_HEIGHT PORTRAIT_H
+
+// ─── Hardware-Pin-Belegung (T5S3 PRO) ───────────────────────────────
+
+// ─── GT911 Touch (I²C-Hauptbus auf Pro) ────────────────────────────
+// INT und RST sind direkte SoC-GPIOs (NICHT über PCA9535) — bestätigt
+// gegen LilyGo Pro `examples/touch/main/main.cpp` und das Pro-README.
+#define TOUCH_SDA      39
+#define TOUCH_SCL      40
+#define TOUCH_INT_PIN  3      // GT911 INT — Achtung: GPIO 3 ist Strap-Pin (JTAG IO9), beim Boot floaten lassen
+#define TOUCH_RST      9      // GT911 RST
+#define TOUCH_ADDR     0x5D
+
+// ─── SD Card (SPI, geteilt mit deaktiviertem LoRa) ─────────────────
+#ifndef SD_CS
+#define SD_CS          12
+#endif
+#ifndef SD_MOSI
+#define SD_MOSI        13
+#endif
+#ifndef SD_MISO
+#define SD_MISO        21
+#endif
+#ifndef SD_SCLK
+#define SD_SCLK        14
+#endif
+
+// ─── Akku: kein ADC, sondern BQ27220 via I²C ───────────────────────
+// BATT_PIN ist auf dem Pro funktionslos (GPIO 14 = SPI SCLK).
+// Wir definieren ihn auf -1, damit Code-Pfade, die ihn referenzieren,
+// sicher den Battery-Provider in battery_bq27220.cpp aufrufen.
+#ifndef BATT_PIN
+#define BATT_PIN       -1
+#endif
+
+// ─── RTC PCF85063 teilt sich Haupt-I²C-Bus ─────────────────────────
+#define RTC_SDA        39
+#define RTC_SCL        40
+
+// ─── Buttons ───────────────────────────────────────────────────────
+// ACHTUNG: Auf dem Pro sind die User-Buttons typischerweise am
+// IO-Expander PCA9535 (I²C 0x20), nicht an direkt verfügbaren GPIOs.
+// Workaround bis Hardware-Validation: BOOT-Button (GPIO 0) als
+// einzige Eingabequelle, Wake-Source = ext1 auf GPIO 0.
+#define BUTTON_PIN     0
+#define PAGE_BUTTON_PIN 0
+// Configurable user button — physical side button on the PCA9535PW IO
+// expander pin IO12 (port 1, bit 2). Active LOW. Read via I2C on the
+// main bus (sda=39, scl=40). Action per gesture is user-configurable
+// via settings (see Settings::userButton* fields).
+#define USER_BUTTON_VIA_PCA9535   1
+#define PCA9535_I2C_ADDR          0x20
+#define PCA9535_REG_INPUT_PORT1   0x01
+#define PCA9535_USER_BUTTON_BIT   2   // IO12 = bit 2 in port 1
+
+// ─── LoRa SX1262 – nicht initialisiert, nur sicher deaktiviert ─────
+#define LORA_CS        46
+#define LORA_RST       1
+#define LORA_BUSY      47
+#define LORA_IRQ       10
+
+// ─── GPS – nicht initialisiert ─────────────────────────────────────
+#define GPS_RX         44
+#define GPS_TX         43
+
+// ─── EPD-I²C (Pro: Haupt-I²C-Bus 39/40) ────────────────────────────
+#define EPD_I2C_SDA    39
+#define EPD_I2C_SCL    40
+
+// ─── BQ27220 Fuel-Gauge ────────────────────────────────────────────
+#define BQ27220_ADDR   0x55
+
+// ─── UI Layout Constants (portrait 540x960) ────────────────────────
+#define MARGIN_X       30
+#define MARGIN_Y       16
+#define HEADER_HEIGHT  66
+#define FOOTER_HEIGHT  50
+#define LINE_SPACING   4
+#define PROGRESS_BAR_H 4
+
+// ─── Font Size Presets (line spacing + margins) ────────────────────
+// fontSizeLevel 0–4: XS, S, M, ML, L
+// Line spacing and horizontal margins per level
+#define FONT_SIZE_LEVEL_COUNT  5
+static const int FONT_LINE_SPACINGS[FONT_SIZE_LEVEL_COUNT] = { 0, 0, 1, 2, 3 };
+static const int FONT_MARGIN_X_VALUES[FONT_SIZE_LEVEL_COUNT] = { 15, 20, 30, 30, 35 };
+
+// Adjustable leading multipliers (line height as a multiple of font height)
+#define LINE_SPACING_LEVEL_COUNT 5
+static const uint8_t LINE_SPACING_PCT[LINE_SPACING_LEVEL_COUNT] = {100, 110, 120, 140, 160};
+
+// Number of reader font families (Sans/Serif/Slab/UI — see FontFamily enum
+// in display.h).  Centralised here so settings.cpp can clamp without
+// including the display layer.  Increment when adding a family AND update
+// the FontFamily enum + _font_table in display.cpp + kFontFamilyNames.
+#define FONT_FAMILY_COUNT 5
+
+// Legacy defines kept for any remaining references
+#define FONT_LINE_SPACING_SMALL   0
+#define FONT_LINE_SPACING_MEDIUM  1
+#define FONT_LINE_SPACING_LARGE   4
+#define FONT_MARGIN_X_SMALL       20
+#define FONT_MARGIN_X_MEDIUM      30
+#define FONT_MARGIN_X_LARGE       40
+
+// ─── Timeouts ───────────────────────────────────────────────────────
+#define SLEEP_TIMEOUT_MS  (5 * 60 * 1000)
+#define TOUCH_POLL_MS     50
+
+// ─── Book Storage ───────────────────────────────────────────────────
+#define BOOKS_DIR      "/books"
+#define PROGRESS_DIR   "/books/.progress"
+#define LINE_CACHE_DIR "/books/.linecache"
+#define SLEEP_IMAGES_DIR "/sleep"
+#define MAX_BOOKS      100

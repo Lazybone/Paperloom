@@ -1,0 +1,60 @@
+# ─── PlatformIO ──────────────────────────────────────────────────────
+.pio/
+.pioenvs/
+.piolibdeps/
+build/
+compile_commands.json
+
+# ─── User-specific config (contains WiFi credentials) ───────────────
+include/config.h
+
+# ─── Compiled binaries ───────────────────────────────────────────────
+*.bin
+*.elf
+*.hex
+*.map
+*.o
+*.a
+
+# ─── Splash-generator side outputs ───────────────────────────────────
+tools/splash_screen.bmp
+tools/splash_screen_preview.png
+
+# ─── Font build cache (regenerable TTF cache for tools/fontconvert.py) ─
+.font-cache/
+
+# ─── Python ──────────────────────────────────────────────────────────
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.mypy_cache/
+.pytest_cache/
+.ruff_cache/
+
+# ─── IDE settings ────────────────────────────────────────────────────
+.vscode/
+.idea/
+*.code-workspace
+.cache/
+
+# ─── OS files ────────────────────────────────────────────────────────
+.DS_Store
+.AppleDouble
+.LSOverride
+Thumbs.db
+desktop.ini
+
+# ─── Backups / temp / logs ───────────────────────────────────────────
+*.bak
+*.bak.*
+*.orig
+*.tmp
+*.swp
+*~
+*.log
+
+# ─── Claude Code ─────────────────────────────────────────────────────
+.claude/
+CLAUDE.md
