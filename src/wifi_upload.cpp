@@ -3,6 +3,7 @@
 #include "settings.h"
 #include "display.h"        // FONT_FAMILY_COUNT for /api/settings validation
 #include "frontlight.h"
+#include "button_action.h"
 #include "reader.h"
 #include <WiFi.h>
 #include <WebServer.h>
@@ -196,7 +197,129 @@ static const char UPLOAD_HTML[] PROGMEM = R"rawliteral(
   }
   .switch input { width: 18px; height: 18px; accent-color: var(--brand); }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; }
-  @media (max-width: 600px) { .grid2 { grid-template-columns: 1fr; } header { padding: 12px 18px; } main { padding: 16px 12px 60px; } }
+  @media (max-width: 600px) { .grid2, .grid3 { grid-template-columns: 1fr; } header { padding: 12px 18px; } main { padding: 16px 12px 60px; } }
+
+  /* ─── Settings: section head, fields, grids ──────────── */
+  .sec-head { display: flex; align-items: center; gap: 10px; margin: 0 0 16px; }
+  .sec-head .sec-icon { width: 18px; height: 18px; color: var(--brand); flex: 0 0 18px; }
+  .sec-head h2 { margin: 0; }
+  .field { margin: 0; }
+  .field + .field, .sec-body > .field + .field, .card-section > .grid2 + .field,
+  .card-section > .field + .grid2, .card-section > .grid2 + .toggle,
+  .card-section > .field + .toggle, .card-section > .toggle + .toggle,
+  .card-section > .sec-head + .toggle, .card-section > .toggle + .sec-body { margin-top: 14px; }
+  .field label { display: block; margin: 0 0 6px; font-weight: 600; font-size: 11px;
+    color: var(--muted); text-transform: uppercase; letter-spacing: 0.7px;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  .hint { margin: 6px 0 0; font-size: 12px; color: var(--muted); line-height: 1.45;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
+  .grid3 { display: grid; grid-template-columns: repeat(3, 1fr); gap: 14px 16px; }
+
+  /* ─── Select ─────────────────────────────────────────── */
+  select {
+    width: 100%; padding: 10px 36px 10px 12px;
+    border: 1px solid var(--border); border-radius: 6px;
+    font-size: 14px; color: var(--text); cursor: pointer;
+    background: #fff url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2378716c' stroke-width='2.5' stroke-linecap='round'><path d='M6 9l6 6 6-6'/></svg>") right 12px center no-repeat;
+    appearance: none; -webkit-appearance: none;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    transition: border-color 0.15s, box-shadow 0.15s;
+  }
+  select:focus { outline: 0; border-color: var(--brand); box-shadow: 0 0 0 3px rgba(180,83,9,0.15); }
+
+  /* ─── Toggle switch ──────────────────────────────────── */
+  .toggle { display: flex; align-items: center; gap: 12px; padding: 6px 0; cursor: pointer;
+    font-size: 14px; user-select: none;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+  .toggle input { position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0; }
+  .toggle .track { width: 38px; height: 22px; background: var(--bg-deep);
+    border: 1px solid var(--border); border-radius: 999px; position: relative;
+    transition: background 0.2s, border-color 0.2s; flex: 0 0 38px;
+  }
+  .toggle .thumb { position: absolute; top: 2px; left: 2px; width: 16px; height: 16px;
+    background: #fff; border-radius: 50%; box-shadow: var(--shadow-sm);
+    transition: transform 0.2s;
+  }
+  .toggle input:checked + .track { background: var(--brand); border-color: var(--brand); }
+  .toggle input:checked + .track .thumb { transform: translateX(16px); }
+  .toggle input:focus-visible + .track { box-shadow: 0 0 0 3px rgba(180,83,9,0.18); }
+  .toggle-label { flex: 1; color: var(--text); }
+
+  /* ─── Segmented control ──────────────────────────────── */
+  .seg { display: flex; background: var(--bg-deep); border: 1px solid var(--border);
+    border-radius: 8px; padding: 3px; gap: 2px; width: 100%;
+  }
+  .seg button { flex: 1; background: transparent; border: 0;
+    padding: 9px 10px; border-radius: 6px; cursor: pointer;
+    font-size: 13px; color: var(--muted); font-weight: 500;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    transition: background 0.15s, color 0.15s, box-shadow 0.15s;
+  }
+  .seg button:hover { color: var(--text); }
+  .seg button.active { background: var(--card); color: var(--text); font-weight: 600;
+    box-shadow: var(--shadow-sm);
+  }
+  .seg button:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--brand); }
+
+  /* ─── Range slider ───────────────────────────────────── */
+  .range { display: flex; align-items: center; gap: 14px; padding: 6px 0; }
+  .range input[type="range"] { flex: 1; -webkit-appearance: none; appearance: none;
+    height: 4px; background: var(--bg-deep); border-radius: 2px; outline: none;
+    border: 1px solid var(--border);
+  }
+  .range input[type="range"]::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 20px; height: 20px;
+    background: var(--brand); border-radius: 50%; cursor: pointer;
+    box-shadow: var(--shadow-sm); border: 2px solid var(--card);
+    transition: transform 0.1s;
+  }
+  .range input[type="range"]::-webkit-slider-thumb:hover { transform: scale(1.1); }
+  .range input[type="range"]::-moz-range-thumb {
+    width: 20px; height: 20px; background: var(--brand); border-radius: 50%;
+    cursor: pointer; border: 2px solid var(--card);
+  }
+  .range input[type="range"]:focus-visible { box-shadow: 0 0 0 3px rgba(180,83,9,0.18); }
+  .range-value { font-variant-numeric: tabular-nums; font-weight: 600; font-size: 13px;
+    color: var(--text); min-width: 52px; text-align: right;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+
+  /* ─── Password reveal ────────────────────────────────── */
+  .input-wrap { position: relative; }
+  .input-wrap input { padding-right: 40px; }
+  .input-wrap .reveal { position: absolute; right: 6px; top: 50%;
+    transform: translateY(-50%); background: transparent; border: 0;
+    padding: 6px; cursor: pointer; color: var(--muted);
+    display: grid; place-items: center; border-radius: 4px;
+  }
+  .input-wrap .reveal:hover { color: var(--text); background: var(--hover); }
+  .input-wrap .reveal:focus-visible { outline: 0; box-shadow: 0 0 0 2px var(--brand); }
+
+  /* ─── Disabled section body ──────────────────────────── */
+  .sec-body { transition: opacity 0.2s; }
+  .sec-body.is-disabled { opacity: 0.45; pointer-events: none; }
+
+  /* ─── Sticky save bar ────────────────────────────────── */
+  .save-bar {
+    position: sticky; bottom: 12px; display: flex; gap: 10px;
+    align-items: center; padding: 12px 18px; margin-top: 18px;
+    background: var(--card); border: 1px solid var(--border);
+    border-radius: var(--radius); box-shadow: var(--shadow-md);
+    z-index: 10;
+  }
+  .save-bar .dirty { flex: 1; display: flex; align-items: center; gap: 8px;
+    font-size: 12px; color: var(--muted);
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+  .save-bar .dirty::before { content: ""; width: 8px; height: 8px;
+    border-radius: 50%; background: var(--border);
+    transition: background 0.2s;
+  }
+  .save-bar.is-dirty .dirty { color: var(--text); font-weight: 500; }
+  .save-bar.is-dirty .dirty::before { background: var(--brand); animation: pulse 1.6s ease-in-out infinite; }
+  .save-bar button.btn:disabled { opacity: 0.4; cursor: not-allowed; pointer-events: none; }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.45; } }
 
   /* ─── States ─────────────────────────────────────────── */
   .empty {
@@ -245,6 +368,10 @@ static const char UPLOAD_HTML[] PROGMEM = R"rawliteral(
     input[type="text"], input[type="password"], input[type="number"] {
       background: #1c1917; color: var(--text);
     }
+    select { background-color: #1c1917; color: var(--text); }
+    .seg button.active { background: #1c1917; color: var(--text); }
+    .toggle .thumb { background: #f5f3ee; }
+    .save-bar { box-shadow: 0 6px 24px rgba(0,0,0,0.5); }
     button.btn { background: var(--brand); color: #1c1917; }
     button.btn:hover { background: #fbbf24; }
     button.btn.brand { background: var(--brand); color: #1c1917; }
@@ -290,54 +417,168 @@ static const char UPLOAD_HTML[] PROGMEM = R"rawliteral(
   <section id="settingsView" role="tabpanel" aria-labelledby="tabSettings" tabindex="0" hidden>
     <div class="card">
       <div class="card-section">
-        <h2>WiFi</h2>
-        <label for="set_wifiSSID">SSID</label>
-        <input type="text" id="set_wifiSSID" maxlength="32">
-        <label for="set_wifiPass">Password (leave blank to keep current)</label>
-        <input type="password" id="set_wifiPass" maxlength="64" placeholder="••••••••">
-      </div>
-      <div class="card-section">
-        <h2>Reading</h2>
-        <div class="grid2">
-          <div>
-            <label for="set_fontSizeLevel">Font Size (0=XS … 4=L)</label>
-            <input type="number" id="set_fontSizeLevel" min="0" max="4">
-          </div>
-          <div>
-            <label for="set_lineSpacingLevel">Line Spacing (0–4)</label>
-            <input type="number" id="set_lineSpacingLevel" min="0" max="4">
-          </div>
-          <div>
-            <label for="set_sleepTimeoutMin">Sleep Timeout (min)</label>
-            <input type="number" id="set_sleepTimeoutMin" min="1" max="240">
-          </div>
-          <div>
-            <label for="set_refreshEveryPages">Refresh Every N Pages</label>
-            <input type="number" id="set_refreshEveryPages" min="1" max="20">
-          </div>
+        <div class="sec-head">
+          <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14.08 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><line x1="12" y1="20" x2="12.01" y2="20"/></svg>
+          <h2>WiFi</h2>
         </div>
-        <div>
-          <label for="set_fontFamily">Font Family</label>
+        <div class="field">
+          <label for="set_wifiSSID">Network name</label>
+          <input type="text" id="set_wifiSSID" maxlength="32" autocomplete="off" spellcheck="false">
+        </div>
+        <div class="field">
+          <label for="set_wifiPass">Password</label>
+          <div class="input-wrap">
+            <input type="password" id="set_wifiPass" maxlength="64" placeholder="••••••••" autocomplete="new-password">
+            <button type="button" class="reveal" id="passReveal" aria-label="Show password" onclick="togglePass()">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+            </button>
+          </div>
+          <p class="hint">Leave blank to keep the current password.</p>
+        </div>
+      </div>
+
+      <div class="card-section">
+        <div class="sec-head">
+          <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M2 3h6a4 4 0 0 1 4 4v14a3 3 0 0 0-3-3H2z"/><path d="M22 3h-6a4 4 0 0 0-4 4v14a3 3 0 0 1 3-3h7z"/></svg>
+          <h2>Reading</h2>
+        </div>
+        <div class="field">
+          <label>Font size</label>
+          <div class="seg" role="group" aria-label="Font size" data-target="set_fontSizeLevel">
+            <button type="button" data-v="0" aria-pressed="false">XS</button>
+            <button type="button" data-v="1" aria-pressed="false">S</button>
+            <button type="button" data-v="2" aria-pressed="false">M</button>
+            <button type="button" data-v="3" aria-pressed="false">L</button>
+            <button type="button" data-v="4" aria-pressed="false">XL</button>
+          </div>
+          <input type="hidden" id="set_fontSizeLevel">
+        </div>
+        <div class="field">
+          <label>Line spacing</label>
+          <div class="seg" role="group" aria-label="Line spacing" data-target="set_lineSpacingLevel">
+            <button type="button" data-v="0" aria-pressed="false">Tight</button>
+            <button type="button" data-v="1" aria-pressed="false">Snug</button>
+            <button type="button" data-v="2" aria-pressed="false">Normal</button>
+            <button type="button" data-v="3" aria-pressed="false">Roomy</button>
+            <button type="button" data-v="4" aria-pressed="false">Loose</button>
+          </div>
+          <input type="hidden" id="set_lineSpacingLevel">
+        </div>
+        <div class="field">
+          <label for="set_fontFamily">Font family</label>
           <select id="set_fontFamily">
-            <option value="0">Sans (Lexend Deca)</option>
-            <option value="1">Serif (Literata)</option>
-            <option value="2">Slab (Bitter)</option>
+            <option value="0">Sans · Lexend Deca</option>
+            <option value="1">Serif · Literata</option>
+            <option value="2">Slab · Bitter</option>
             <option value="3">Inter</option>
           </select>
         </div>
-        <div class="switch"><input type="checkbox" id="set_showPageNumbers"> <label for="set_showPageNumbers" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);font-size:14px">Show Page Numbers</label></div>
-        <div class="switch"><input type="checkbox" id="set_showBattery"> <label for="set_showBattery" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);font-size:14px">Show Battery</label></div>
+        <div class="grid2">
+          <div class="field">
+            <label for="set_sleepTimeoutMin">Sleep after</label>
+            <input type="number" id="set_sleepTimeoutMin" min="1" max="240">
+            <p class="hint">Minutes of inactivity before sleep.</p>
+          </div>
+          <div class="field">
+            <label for="set_refreshEveryPages">Full refresh every</label>
+            <input type="number" id="set_refreshEveryPages" min="1" max="20">
+            <p class="hint">Pages between full e-ink refreshes.</p>
+          </div>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set_showPageNumbers">
+          <span class="track"><span class="thumb"></span></span>
+          <span class="toggle-label">Show page numbers</span>
+        </label>
+        <label class="toggle">
+          <input type="checkbox" id="set_showBattery">
+          <span class="track"><span class="thumb"></span></span>
+          <span class="toggle-label">Show battery indicator</span>
+        </label>
       </div>
+
       <div class="card-section">
-        <h2>Frontlight</h2>
-        <div class="switch"><input type="checkbox" id="set_frontlightEnabled"> <label for="set_frontlightEnabled" style="margin:0;text-transform:none;letter-spacing:0;font-weight:400;color:var(--text);font-size:14px">Enabled</label></div>
-        <label for="set_frontlightBrightness">Brightness (0–100%)</label>
-        <input type="number" id="set_frontlightBrightness" min="0" max="100">
+        <div class="sec-head">
+          <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="5"/><line x1="12" y1="1" x2="12" y2="3"/><line x1="12" y1="21" x2="12" y2="23"/><line x1="4.22" y1="4.22" x2="5.64" y2="5.64"/><line x1="18.36" y1="18.36" x2="19.78" y2="19.78"/><line x1="1" y1="12" x2="3" y2="12"/><line x1="21" y1="12" x2="23" y2="12"/><line x1="4.22" y1="19.78" x2="5.64" y2="18.36"/><line x1="18.36" y1="5.64" x2="19.78" y2="4.22"/></svg>
+          <h2>Frontlight</h2>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set_frontlightEnabled">
+          <span class="track"><span class="thumb"></span></span>
+          <span class="toggle-label">Frontlight enabled</span>
+        </label>
+        <div class="sec-body" id="frontlightBody">
+          <div class="field">
+            <label for="set_frontlightBrightness">Brightness</label>
+            <div class="range">
+              <input type="range" id="set_frontlightBrightness" min="0" max="100" step="1" aria-valuemin="0" aria-valuemax="100">
+              <span class="range-value" id="val_brightness" aria-live="polite">0%</span>
+            </div>
+          </div>
+        </div>
       </div>
-      <div class="footer-actions">
-        <button class="btn ghost" onclick="loadSettings()">Reload</button>
-        <button class="btn brand" onclick="saveSettings()">Save Settings</button>
+
+      <div class="card-section">
+        <div class="sec-head">
+          <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3"/></svg>
+          <h2>IO48 button</h2>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set_userButtonEnabled">
+          <span class="track"><span class="thumb"></span></span>
+          <span class="toggle-label">Enable button</span>
+        </label>
+        <div class="sec-body" id="userBtnBody">
+          <div class="grid3">
+            <div class="field">
+              <label for="set_userButtonTapAction">Tap</label>
+              <select id="set_userButtonTapAction" class="btnAction"></select>
+            </div>
+            <div class="field">
+              <label for="set_userButtonDoubleAction">Double tap</label>
+              <select id="set_userButtonDoubleAction" class="btnAction"></select>
+            </div>
+            <div class="field">
+              <label for="set_userButtonLongAction">Hold</label>
+              <select id="set_userButtonLongAction" class="btnAction"></select>
+            </div>
+          </div>
+        </div>
       </div>
+
+      <div class="card-section">
+        <div class="sec-head">
+          <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="12" cy="12" r="3"/></svg>
+          <h2>Boot button</h2>
+        </div>
+        <label class="toggle">
+          <input type="checkbox" id="set_bootButtonEnabled">
+          <span class="track"><span class="thumb"></span></span>
+          <span class="toggle-label">Enable button</span>
+        </label>
+        <div class="sec-body" id="bootBtnBody">
+          <div class="grid3">
+            <div class="field">
+              <label for="set_bootButtonTapAction">Tap</label>
+              <select id="set_bootButtonTapAction" class="btnAction"></select>
+            </div>
+            <div class="field">
+              <label for="set_bootButtonDoubleAction">Double tap</label>
+              <select id="set_bootButtonDoubleAction" class="btnAction"></select>
+            </div>
+            <div class="field">
+              <label for="set_bootButtonLongAction">Hold</label>
+              <select id="set_bootButtonLongAction" class="btnAction"></select>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div class="save-bar" id="saveBar">
+      <span class="dirty" id="dirtyLabel">All changes saved</span>
+      <button class="btn ghost" id="discardBtn" onclick="loadSettings()" disabled>Discard</button>
+      <button class="btn brand" id="saveBtn" onclick="saveSettings()" disabled>Save changes</button>
     </div>
   </section>
 </main>
@@ -567,7 +808,114 @@ function doUpload() {
   xhr.send(fd);
 }
 
+const BUTTON_ACTIONS = [
+  {v: 0, label: 'None'},
+  {v: 1, label: 'Light toggle'},
+  {v: 2, label: 'Library'},
+  {v: 3, label: 'Sleep'},
+  {v: 4, label: 'Next page'},
+  {v: 5, label: 'Prev page'},
+  {v: 6, label: 'Menu'}
+];
+
+function populateButtonActionSelects() {
+  document.querySelectorAll('select.btnAction').forEach(sel => {
+    if (sel.options.length > 0) return;
+    BUTTON_ACTIONS.forEach(a => {
+      const o = document.createElement('option');
+      o.value = String(a.v);
+      o.textContent = a.label;
+      sel.appendChild(o);
+    });
+  });
+}
+
+function setSeg(target, value) {
+  const v = String(value);
+  const hidden = document.getElementById(target);
+  if (hidden) hidden.value = v;
+  document.querySelectorAll('.seg[data-target="' + target + '"] button').forEach(b => {
+    const active = b.dataset.v === v;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-pressed', active ? 'true' : 'false');
+  });
+}
+
+function bindSegmented() {
+  document.querySelectorAll('.seg').forEach(seg => {
+    const target = seg.dataset.target;
+    seg.addEventListener('click', e => {
+      const btn = e.target.closest('button[data-v]');
+      if (!btn) return;
+      setSeg(target, btn.dataset.v);
+      markDirty();
+    });
+  });
+}
+
+function bindBrightness() {
+  const r = document.getElementById('set_frontlightBrightness');
+  const lbl = document.getElementById('val_brightness');
+  r.addEventListener('input', () => { lbl.textContent = r.value + '%'; });
+}
+
+function syncBodyMirror(toggleId, bodyId) {
+  const tgl = document.getElementById(toggleId);
+  const body = document.getElementById(bodyId);
+  const apply = () => body.classList.toggle('is-disabled', !tgl.checked);
+  tgl.addEventListener('change', apply);
+  apply();
+}
+
+function togglePass() {
+  const inp = document.getElementById('set_wifiPass');
+  const btn = document.getElementById('passReveal');
+  const showing = inp.type === 'text';
+  inp.type = showing ? 'password' : 'text';
+  btn.setAttribute('aria-label', showing ? 'Show password' : 'Hide password');
+}
+
+let isDirty = false;
+let suppressDirty = false;
+
+function markDirty() {
+  if (suppressDirty || isDirty) return;
+  isDirty = true;
+  document.getElementById('saveBar').classList.add('is-dirty');
+  document.getElementById('dirtyLabel').textContent = 'Unsaved changes';
+  document.getElementById('saveBtn').disabled = false;
+  document.getElementById('discardBtn').disabled = false;
+}
+
+function markClean() {
+  isDirty = false;
+  document.getElementById('saveBar').classList.remove('is-dirty');
+  document.getElementById('dirtyLabel').textContent = 'All changes saved';
+  document.getElementById('saveBtn').disabled = true;
+  document.getElementById('discardBtn').disabled = true;
+}
+
+function bindDirtyTracking() {
+  document.querySelectorAll('#settingsView input, #settingsView select').forEach(el => {
+    const useInput = el.type === 'text' || el.type === 'password' || el.type === 'number' || el.type === 'range';
+    el.addEventListener(useInput ? 'input' : 'change', markDirty);
+  });
+}
+
+let settingsBound = false;
+
 async function loadSettings() {
+  populateButtonActionSelects();
+  if (!settingsBound) {
+    bindSegmented();
+    bindBrightness();
+    syncBodyMirror('set_frontlightEnabled', 'frontlightBody');
+    syncBodyMirror('set_userButtonEnabled', 'userBtnBody');
+    syncBodyMirror('set_bootButtonEnabled', 'bootBtnBody');
+    bindDirtyTracking();
+    settingsBound = true;
+  }
+  suppressDirty = true;
   try {
     const r = await fetch('/api/settings');
     const d = await r.json();
@@ -575,16 +923,30 @@ async function loadSettings() {
     const s = d.settings;
     document.getElementById('set_wifiSSID').value = s.wifiSSID || '';
     document.getElementById('set_wifiPass').value = '';
-    document.getElementById('set_fontSizeLevel').value = s.fontSizeLevel;
-    document.getElementById('set_lineSpacingLevel').value = s.lineSpacingLevel;
+    setSeg('set_fontSizeLevel', s.fontSizeLevel ?? 2);
+    setSeg('set_lineSpacingLevel', s.lineSpacingLevel ?? 2);
     document.getElementById('set_sleepTimeoutMin').value = s.sleepTimeoutMin;
     document.getElementById('set_refreshEveryPages').value = s.refreshEveryPages;
     document.getElementById('set_fontFamily').value = String(s.fontFamily ?? 0);
     document.getElementById('set_showPageNumbers').checked = !!s.showPageNumbers;
     document.getElementById('set_showBattery').checked = !!s.showBattery;
     document.getElementById('set_frontlightEnabled').checked = !!s.frontlightEnabled;
-    document.getElementById('set_frontlightBrightness').value = s.frontlightBrightness;
+    document.getElementById('set_frontlightBrightness').value = s.frontlightBrightness ?? 0;
+    document.getElementById('val_brightness').textContent = (s.frontlightBrightness ?? 0) + '%';
+    document.getElementById('set_userButtonEnabled').checked = !!s.userButtonEnabled;
+    document.getElementById('set_userButtonTapAction').value = String(s.userButtonTapAction ?? 0);
+    document.getElementById('set_userButtonDoubleAction').value = String(s.userButtonDoubleAction ?? 0);
+    document.getElementById('set_userButtonLongAction').value = String(s.userButtonLongAction ?? 0);
+    document.getElementById('set_bootButtonEnabled').checked = !!s.bootButtonEnabled;
+    document.getElementById('set_bootButtonTapAction').value = String(s.bootButtonTapAction ?? 0);
+    document.getElementById('set_bootButtonDoubleAction').value = String(s.bootButtonDoubleAction ?? 0);
+    document.getElementById('set_bootButtonLongAction').value = String(s.bootButtonLongAction ?? 0);
+    ['set_frontlightEnabled','set_userButtonEnabled','set_bootButtonEnabled'].forEach(id => {
+      document.getElementById(id).dispatchEvent(new Event('change'));
+    });
+    markClean();
   } catch (e) { toast(e.message, true); }
+  suppressDirty = false;
 }
 
 async function saveSettings() {
@@ -599,8 +961,20 @@ async function saveSettings() {
     showPageNumbers: document.getElementById('set_showPageNumbers').checked,
     showBattery: document.getElementById('set_showBattery').checked,
     frontlightEnabled: document.getElementById('set_frontlightEnabled').checked,
-    frontlightBrightness: +document.getElementById('set_frontlightBrightness').value
+    frontlightBrightness: +document.getElementById('set_frontlightBrightness').value,
+    userButtonEnabled: document.getElementById('set_userButtonEnabled').checked,
+    userButtonTapAction: +document.getElementById('set_userButtonTapAction').value,
+    userButtonDoubleAction: +document.getElementById('set_userButtonDoubleAction').value,
+    userButtonLongAction: +document.getElementById('set_userButtonLongAction').value,
+    bootButtonEnabled: document.getElementById('set_bootButtonEnabled').checked,
+    bootButtonTapAction: +document.getElementById('set_bootButtonTapAction').value,
+    bootButtonDoubleAction: +document.getElementById('set_bootButtonDoubleAction').value,
+    bootButtonLongAction: +document.getElementById('set_bootButtonLongAction').value
   };
+  const saveBtn = document.getElementById('saveBtn');
+  const origLabel = saveBtn.textContent;
+  saveBtn.disabled = true;
+  saveBtn.textContent = 'Saving…';
   try {
     const r = await fetch('/api/settings', {
       method: 'POST', headers: {'Content-Type':'application/json'},
@@ -608,8 +982,15 @@ async function saveSettings() {
     });
     const d = await r.json();
     if (!d.ok) throw new Error(d.error || 'save failed');
+    document.getElementById('set_wifiPass').value = '';
     toast('Settings saved');
-  } catch (e) { toast(e.message, true); }
+    markClean();
+  } catch (e) {
+    toast(e.message, true);
+    saveBtn.disabled = false;
+  } finally {
+    saveBtn.textContent = origLabel;
+  }
 }
 
 refreshList();
@@ -1023,6 +1404,14 @@ static void handleApiSettingsGet() {
     set["showBattery"]         = s.showBattery;
     set["frontlightEnabled"]   = s.frontlightEnabled;
     set["frontlightBrightness"]= s.frontlightBrightness;
+    set["userButtonEnabled"]      = s.userButtonEnabled;
+    set["userButtonTapAction"]    = s.userButtonTapAction;
+    set["userButtonDoubleAction"] = s.userButtonDoubleAction;
+    set["userButtonLongAction"]   = s.userButtonLongAction;
+    set["bootButtonEnabled"]      = s.bootButtonEnabled;
+    set["bootButtonTapAction"]    = s.bootButtonTapAction;
+    set["bootButtonDoubleAction"] = s.bootButtonDoubleAction;
+    set["bootButtonLongAction"]   = s.bootButtonLongAction;
     String body;
     serializeJson(doc, body);
     _server.send(200, "application/json", body);
@@ -1119,6 +1508,23 @@ static void handleApiSettingsPost() {
         s.frontlightBrightness = (uint8_t)v;
         flightChanged = true;
     }
+
+    // Buttons.  Action values must be < BTN_ACTION_COUNT — clamp to None on
+    // anything out of range so a buggy client cannot brick a gesture.
+    auto applyAction = [&](const char* key, uint8_t& dst) {
+        if (!doc.containsKey(key)) return;
+        int v = doc[key].as<int>();
+        if (v < 0 || v >= (int)BTN_ACTION_COUNT) v = 0;
+        dst = (uint8_t)v;
+    };
+    if (doc.containsKey("userButtonEnabled")) s.userButtonEnabled = doc["userButtonEnabled"].as<bool>();
+    applyAction("userButtonTapAction",    s.userButtonTapAction);
+    applyAction("userButtonDoubleAction", s.userButtonDoubleAction);
+    applyAction("userButtonLongAction",   s.userButtonLongAction);
+    if (doc.containsKey("bootButtonEnabled")) s.bootButtonEnabled = doc["bootButtonEnabled"].as<bool>();
+    applyAction("bootButtonTapAction",    s.bootButtonTapAction);
+    applyAction("bootButtonDoubleAction", s.bootButtonDoubleAction);
+    applyAction("bootButtonLongAction",   s.bootButtonLongAction);
 
     if (!settings_save()) {
         sendJsonError(500, "SD write failed");
