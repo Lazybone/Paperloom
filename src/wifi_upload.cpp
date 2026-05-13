@@ -463,6 +463,7 @@ static const char UPLOAD_HTML[] PROGMEM = R"rawliteral(
             <input id="kosyncDeviceName" type="text" maxlength="32" autocomplete="off" spellcheck="false">
           </div>
           <button type="button" class="btn brand" onclick="saveKosync()">Save KoSync</button>
+          <button type="button" onclick="registerKosync()" style="margin-left:8px">Register new account</button>
         </fieldset>
       </div>
 
@@ -1013,6 +1014,29 @@ async function saveKosync() {
       document.getElementById('kosyncPassword').value = '';
     } else {
       toast('KoSync failed: ' + ((j && j.error) || 'unknown'), true);
+    }
+  } catch (e) { toast(e.message, true); }
+}
+
+// WP-6b: Forward an account-creation request to the configured kosync server.
+// The body deliberately omits `server` — the device only ever forwards to
+// Settings.kosyncServer (concept C1).
+async function registerKosync() {
+  const user = document.getElementById('kosyncUser').value;
+  const pw   = document.getElementById('kosyncPassword').value;
+  if (!user || !pw) { toast('User + password required', true); return; }
+  try {
+    const r = await fetch('/api/kosync-register', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify({user, password: pw})
+    });
+    const j = await r.json();
+    if (j && j.ok) {
+      toast('Account created — now save the credentials');
+      document.getElementById('kosyncPassword').value = '';
+    } else {
+      toast('Register failed: ' + ((j && j.error) || 'unknown'), true);
     }
   } catch (e) { toast(e.message, true); }
 }

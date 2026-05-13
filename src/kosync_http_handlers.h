@@ -8,6 +8,11 @@
 //   POST /api/kosync-settings  → consumes { server, user, password, deviceName? },
 //                                hashes password server-side (MD5 hex, 32 lc),
 //                                writes settings, returns { ok } or { ok:false, error }.
+//   POST /api/kosync-register  → consumes { user, password } (NO server field;
+//                                rejected if present), hashes password
+//                                server-side and forwards to
+//                                Settings.kosyncServer + "/users/create".
+//                                Returns { ok } or { ok:false, error }.
 //
 // WP-6a leaves a clearly-marked seam at the top of the POST handler where
 // WP-6c will plug in the PIN gate (lockout + 401/429 responses + PIN consume).

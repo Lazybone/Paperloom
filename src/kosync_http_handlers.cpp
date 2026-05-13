@@ -27,11 +27,14 @@
 
 #include <Arduino.h>
 #include <ArduinoJson.h>
+#include <HTTPClient.h>
+#include <WiFiClientSecure.h>
 #include <mbedtls/md5.h>
 #include <stdint.h>
 #include <stdio.h>
 
 #include "settings.h"
+#include "tls_certs.h"
 
 namespace {
 
@@ -255,10 +258,127 @@ void handle_post() {
     send_json(200, String("{\"ok\":true}"));
 }
 
+// POST /api/kosync-register — proxy a kosync account-creation request to the
+// device's configured kosync server. The request body MUST NOT contain a
+// `server` field; the target URL is always sourced from Settings.kosyncServer
+// to prevent credential exfiltration via a forged target.
+//
+// On success the device returns { ok:true }. On the well-known kosync 402
+// (username already taken) the device translates to 409 + { error:
+// "username_taken" } so the UI can surface the conflict clearly without
+// leaking upstream protocol details.
+void handle_post_register() {
+    if (!g_server) return;
+
+    // TODO(WP-6c): PIN gate enforcement seam — same hooks as POST /api/kosync-settings.
+    //   • Check kosync_pin_is_locked_out() → 429 + Retry-After.
+    //   • Check incoming `pin` field; on missing/invalid → 401 with fresh PIN.
+    //   • On valid PIN → consume + proceed.
+
+    if (!g_server->hasArg("plain")) {
+        send_json(400, String("{\"ok\":false,\"error\":\"missing body\"}"));
+        return;
+    }
+
+    String body = g_server->arg("plain");
+    if (body.length() > 1024) {
+        send_error(413, "body", "too large");
+        return;
+    }
+
+    DynamicJsonDocument doc(512);
+    const DeserializationError de = deserializeJson(doc, body);
+    if (de) {
+        send_json(400, String("{\"ok\":false,\"error\":\"invalid json\"}"));
+        return;
+    }
+
+    // C1: reject any client-supplied `server` to prevent credential
+    // exfiltration. The target URL is always Settings.kosyncServer.
+    if (doc.containsKey("server")) {
+        send_json(400, String("{\"ok\":false,\"error\":\"unknown_field: server\"}"));
+        return;
+    }
+
+    String user = String(doc["user"] | "");
+    String pw   = String(doc["password"] | "");
+
+    if (!is_valid_kosync_user(user)) {
+        scrub_plaintext(pw);
+        send_json(400, String("{\"ok\":false,\"error\":\"user: invalid charset or length\"}"));
+        return;
+    }
+    if (pw.length() < 1 || pw.length() > 128) {
+        scrub_plaintext(pw);
+        send_json(400, String("{\"ok\":false,\"error\":\"password: length 1..128\"}"));
+        return;
+    }
+
+    Settings& s = settings_get();
+    String target = s.kosyncServer;
+    if (target.length() < 8 || !target.startsWith("https://")) {
+        scrub_plaintext(pw);
+        send_json(400, String("{\"ok\":false,\"error\":\"kosyncServer not configured\"}"));
+        return;
+    }
+
+    // Hash plaintext IMMEDIATELY, then zero plaintext before any network I/O.
+    const String pwMd5 = md5_hex(pw);
+    scrub_plaintext(pw);
+    if (pwMd5.length() != 32) {
+        Serial.printf("[kosync_http] register_post: md5_failed\n");
+        send_json(500, String("{\"ok\":false,\"error\":\"md5 failed\"}"));
+        return;
+    }
+
+    // Build outgoing JSON: { username, password: <md5-hex> }.
+    StaticJsonDocument<256> outDoc;
+    outDoc["username"] = user;
+    outDoc["password"] = pwMd5;
+    String outBody;
+    serializeJson(outDoc, outBody);
+
+    // POST to {target}/users/create with the project-wide pinned CA bundle.
+    WiFiClientSecure tls;
+    tls.setCACert(PAPERLOOM_TRUSTED_ROOTS);
+    tls.setHandshakeTimeout(15);  // seconds
+
+    HTTPClient http;
+    http.setTimeout(15000);
+    http.setFollowRedirects(HTTPC_DISABLE_FOLLOW_REDIRECTS);
+
+    const String url = target + "/users/create";
+    if (!http.begin(tls, url)) {
+        send_json(502, String("{\"ok\":false,\"error\":\"begin failed\"}"));
+        Serial.printf("[kosync_http] register_post: upstream=begin_failed\n");
+        return;
+    }
+    http.addHeader("Content-Type", "application/json");
+    const int code = http.POST(outBody);
+    http.end();
+
+    if (code == 200 || code == 201) {
+        send_json(200, String("{\"ok\":true}"));
+    } else if (code == 402) {
+        // kosync convention: 402 Payment Required = username taken.
+        send_json(409, String("{\"ok\":false,\"error\":\"username_taken\"}"));
+    } else if (code == 401 || code == 403) {
+        send_json(401, String("{\"ok\":false,\"error\":\"auth\"}"));
+    } else if (code <= 0) {
+        send_json(502, String("{\"ok\":false,\"error\":\"server_unreachable\"}"));
+    } else {
+        send_json(502, String("{\"ok\":false,\"error\":\"server: ") + String(code) + "\"}");
+    }
+
+    Serial.printf("[kosync_http] register_post: upstream=%d response=%s\n", code,
+                  (code == 200 || code == 201) ? "ok" : "fail");
+}
+
 }  // namespace
 
 void kosync_http_register_handlers(WebServer& server) {
     g_server = &server;
     server.on("/api/kosync-settings", HTTP_GET,  handle_get);
     server.on("/api/kosync-settings", HTTP_POST, handle_post);
+    server.on("/api/kosync-register", HTTP_POST, handle_post_register);
 }
