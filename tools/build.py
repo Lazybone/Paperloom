@@ -33,7 +33,7 @@ CHANGELOG = REPO_ROOT / "CHANGELOG.md"
 CONFIG_H = REPO_ROOT / "include" / "config.h"
 README = REPO_ROOT / "README.md"
 BUILD_DIR = REPO_ROOT / "build"
-MANIFEST = REPO_ROOT / "docs" / "manifest.json"
+MANIFEST = REPO_ROOT / "site" / "flasher" / "manifest.json"
 PIO_BUILD_DIR = REPO_ROOT / ".pio" / "build" / "gh_release"
 PIO_BIN = PIO_BUILD_DIR / "firmware.bin"
 PIO_BOOTLOADER = PIO_BUILD_DIR / "bootloader.bin"
@@ -345,11 +345,37 @@ def write_release_notes(notes_path: Path, version: str, date: str, body: str, dr
     notes_path.write_text(content, encoding="utf-8")
 
 
+def extract_versioned_body(text: str, version: str) -> str | None:
+    """Return the body under a pre-existing `## v<version>` header, or None.
+
+    Used when re-running `build.py <version>` for a release that was already
+    cut — lets the script regenerate binaries + release notes without
+    rewriting the CHANGELOG twice.
+    """
+    pattern = re.compile(
+        r"^## v" + re.escape(version) + r"(?: — [^\n]+)?\n+(.*?)(?=\n## |\Z)",
+        re.MULTILINE | re.DOTALL,
+    )
+    match = pattern.search(text)
+    if not match:
+        return None
+    return match.group(1).rstrip() + "\n"
+
+
 def rewrite_changelog(version: str, date: str, dry_run: bool) -> str:
     text = CHANGELOG.read_text(encoding="utf-8")
     preamble, body, rest = split_changelog(text)
 
     if not body.strip():
+        # Idempotent path: if the target version is already in the CHANGELOG
+        # (e.g. the release was cut earlier and we're re-running for the same
+        # version), reuse its body rather than failing.
+        existing = extract_versioned_body(text, version)
+        if existing is not None:
+            print(
+                f"-> CHANGELOG.md:   `## v{version}` already present, reusing existing body"
+            )
+            return existing
         fail("'## Unreleased' section is empty — add notes before cutting a release")
 
     versioned_header = f"## v{version} — {date}\n"
