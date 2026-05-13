@@ -96,6 +96,22 @@ public:
     // Parser access for inline image rendering
     EpubParser& getParser() { return _parser; }
 
+    // ─── KOReader sync (kosync) ────────────────────────────────────────
+    // Tri-state result of applying remote progress.
+    enum class ApplyResult { Ok, OutOfBounds, SaveFailed };
+
+    // Get cached partial-MD5 of the current book. Computes on demand if empty.
+    // Returns empty String if no book is open or hash computation fails.
+    String getDocumentHash();
+
+    // Last-sync timestamp accessors (epoch seconds; 0 = never synced).
+    void setLastSyncTimestamp(uint32_t ts);
+    uint32_t getLastSyncTimestamp() const { return _lastSyncTimestamp; }
+
+    // Apply remote progress from a kosync sync. Validates bounds; does NOT
+    // redraw (caller's responsibility). Persists via saveProgress() on success.
+    ApplyResult applyRemoteProgress(int chapter, int page, float percentage);
+
 private:
     EpubParser _parser;
     String _title;
@@ -142,6 +158,14 @@ private:
     std::vector<uint32_t> _recentPageTimesMs;
     uint32_t _avgPageTimeMs = 0;
     int _currentChapterWordCount = 0;
+
+    // KOReader sync state. Hash is 32-char lowercase hex; populated lazily
+    // on first sync need (deferred to avoid SD reads on every book open).
+    // _kosyncEpubSize tracks the file size at hash-compute time so cached
+    // hashes can be invalidated when the EPUB file is replaced.
+    String _documentHash;
+    uint32_t _lastSyncTimestamp = 0;
+    size_t _kosyncEpubSize = 0;
 
     void loadChapter(int chapter);
     void updatePageLines();

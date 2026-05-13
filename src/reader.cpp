@@ -5,6 +5,7 @@
 #include "storage_utils.h"
 #include "inline_image.h"
 #include "debug_trace.h"
+#include "kosync_hash.h"
 #include <ArduinoJson.h>
 #include <SD.h>
 #include <Preferences.h>
@@ -42,6 +43,13 @@ bool BookReader::openBook(const char* filepath) {
     _filepath = String(filepath);
     _title = _parser.getTitle();
     _author = _parser.getAuthor();
+
+    // Reset kosync state; loadProgress() below will repopulate from JSON if
+    // the saved progress file is v2. Hash itself is computed lazily on first
+    // getDocumentHash() call to avoid extra SD reads at open time.
+    _documentHash = "";
+    _lastSyncTimestamp = 0;
+    _kosyncEpubSize = 0;
 
     recalculateLayout();
     debug_trace_mark("reader:openBook:after_layout");
@@ -124,6 +132,9 @@ void BookReader::closeBook() {
     _recentPageTimesMs.clear();
     _avgPageTimeMs = 0;
     _currentChapterWordCount = 0;
+    _documentHash = "";
+    _lastSyncTimestamp = 0;
+    _kosyncEpubSize = 0;
 }
 
 void BookReader::loadChapter(int chapter) {
@@ -802,13 +813,20 @@ bool BookReader::saveProgress() {
     doc["pages_read"] = _totalPagesRead;
 
     // Cache invalidation: record EPUB file size so stale cache is discarded
-    // if the file is replaced.
-    doc["cache_version"] = 1;
+    // if the file is replaced. Schema v2 (WP-11) adds kosync hash + last-sync
+    // timestamp; older v1 files still load via loadProgress() with defaults.
+    doc["cache_version"] = 2;
     File ef = SD.open(_filepath.c_str(), FILE_READ);
     if (ef) {
         doc["epub_size"] = (uint32_t)ef.size();
         ef.close();
     }
+
+    // kosync fields. Empty hash / zero timestamp are valid defaults — they
+    // simply indicate the hash hasn't been computed and the book has never
+    // been synced yet.
+    doc["kosync_document_hash"] = _documentHash;
+    doc["kosync_last_sync"] = _lastSyncTimestamp;
 
     // Chapter title cache persistence removed to save heap — titles are
     // loaded lazily from ZIP when the TOC screen is opened.
@@ -870,6 +888,14 @@ void BookReader::loadProgress() {
     _totalReadingTimeSec = doc["reading_time_sec"] | (uint32_t)0;
     _totalPagesRead = doc["pages_read"] | (uint32_t)0;
 
+    // kosync fields (schema v2). Missing keys on v1 files yield safe defaults;
+    // the next saveProgress() bumps the on-disk schema to v2 automatically.
+    _documentHash = doc["kosync_document_hash"] | String("");
+    _lastSyncTimestamp = doc["kosync_last_sync"] | (uint32_t)0;
+    // Restore cached EPUB size so kosync_hash_is_valid() can decide if the
+    // cached hash still matches the current file.
+    _kosyncEpubSize = (size_t)(doc["epub_size"] | (uint32_t)0);
+
     if (_currentChapter >= chapterCount) {
         _currentChapter = 0;
         _currentPage = 0;
@@ -899,4 +925,85 @@ void BookReader::loadProgress() {
 
     Serial.printf("Progress loaded: ch%d pg%d, %d bookmarks\n",
                   _currentChapter, _currentPage, _bookmarks.size());
+}
+
+// ─── KOReader sync (kosync) ─────────────────────────────────────────
+
+String BookReader::getDocumentHash() {
+    if (_filepath.length() == 0) return String();
+
+    // Reuse cached hash only if the EPUB file size still matches what we
+    // recorded when the hash was computed. A size mismatch means the file
+    // was replaced; the cached digest is stale.
+    if (_documentHash.length() == 32 &&
+        kosync_hash_is_valid(_filepath, _kosyncEpubSize)) {
+        return _documentHash;
+    }
+
+    String hash = kosync_compute_document_hash(_filepath);
+    if (hash.length() != 32) {
+        // Compute failed (file unreadable, partial read, etc). Leave any
+        // existing cached hash in place but do not return a half-good value.
+        Serial.println("Reader: kosync hash compute failed");
+        return String();
+    }
+
+    _documentHash = hash;
+    // Record file size at compute-time so future kosync_hash_is_valid()
+    // checks can detect replaced EPUBs.
+    File ef = SD.open(_filepath.c_str(), FILE_READ);
+    if (ef) {
+        _kosyncEpubSize = (size_t)ef.size();
+        ef.close();
+    }
+
+    // Persist the freshly-computed hash so the next session doesn't have
+    // to recompute. Failure here is non-fatal — the hash remains in RAM
+    // for the duration of this session.
+    saveProgress();
+    return _documentHash;
+}
+
+void BookReader::setLastSyncTimestamp(uint32_t ts) {
+    _lastSyncTimestamp = ts;
+}
+
+BookReader::ApplyResult BookReader::applyRemoteProgress(int chapter, int page,
+                                                       float percentage) {
+    if (_filepath.length() == 0) return ApplyResult::OutOfBounds;
+
+    // Upfront, side-effect-free validation: chapter index and percentage.
+    int chapterCount = _parser.getChapterCount();
+    if (chapter < 0 || chapter >= chapterCount) return ApplyResult::OutOfBounds;
+    if (page < 0) return ApplyResult::OutOfBounds;
+    if (percentage < 0.0f || percentage > 1.0f) return ApplyResult::OutOfBounds;
+
+    // Page count is only known after a chapter is loaded (lines are
+    // paginated lazily on SD). Snapshot the current location so we can
+    // revert if the remote page falls outside the target chapter's range.
+    int prevChapter = _currentChapter;
+    int prevPage = _currentPage;
+
+    if (chapter != _currentChapter) {
+        loadChapter(chapter);
+    }
+
+    if (page >= _totalPages) {
+        // Revert: restore the previous chapter/page so the caller sees no
+        // visible state change for an out-of-bounds remote update.
+        if (chapter != prevChapter) {
+            loadChapter(prevChapter);
+        }
+        if (prevPage >= 0 && prevPage < _totalPages) {
+            _currentPage = prevPage;
+        }
+        return ApplyResult::OutOfBounds;
+    }
+
+    _currentPage = page;
+    // Intentionally do not call updatePageLines() or notePageShown(): the
+    // caller owns the redraw decision (per WP-11 contract).
+
+    if (!saveProgress()) return ApplyResult::SaveFailed;
+    return ApplyResult::Ok;
 }
