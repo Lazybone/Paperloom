@@ -614,15 +614,24 @@ void ui_reader_menu_draw(BookReader& reader) {
     display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
     y += MENU_ITEM_H;
 
-    // Hint at bottom
+    // Hint at bottom — only drawn when the menu is short enough to leave
+    // room below the last item. When the menu fills the screen (e.g. with
+    // the Back row visible), suppress BOTH the bookmark notice and the
+    // hint instead of overlapping the menu entries (a half-drawn state
+    // would be worse than no notice).
     const char* hint = "Tap outside to resume";
     int hw = display_text_width(hint);
-    if (reader.isCurrentPageBookmarked()) {
-        const char* mark = "This page is bookmarked";
-        int mw = display_text_width(mark);
-        display_draw_text((W - mw) / 2, H - 132, mark, 6);
+    int hintGlyphTop = (H - 100) - FONT_H;       // top of hint glyph cell
+    int markGlyphTop = (H - 132) - FONT_H;       // top of bookmark glyph cell (higher line)
+    (void)hintGlyphTop;                          // markGlyphTop is the binding constraint
+    if (markGlyphTop >= y + 6) {
+        if (reader.isCurrentPageBookmarked()) {
+            const char* mark = "This page is bookmarked";
+            int mw = display_text_width(mark);
+            display_draw_text((W - mw) / 2, H - 132, mark, 6);
+        }
+        display_draw_text((W - hw) / 2, H - 100, hint, 10);
     }
-    display_draw_text((W - hw) / 2, H - 100, hint, 10);
 
     display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
     display_flush();

@@ -414,6 +414,7 @@ static void handleReaderTouch(int x, int y, bool isLongPress) {
 static void handleMenuTouch(int x, int y) {
     AppState newState = ui_reader_menu_touch(x, y, reader, readerRefresh);
     if (newState == STATE_SLEEP_REQUEST) {
+        // STATE_SLEEP_REQUEST is a sentinel value; see include/state.h for contract.
         enterDeepSleep(true);
         return;  // Defensive: enterDeepSleep does not return; if it ever did,
                  // we must NOT assign STATE_SLEEP_REQUEST to appState
@@ -970,7 +971,14 @@ void setup() {
         // Guard against a corrupted / future-firmware NVS value landing us in
         // an undefined AppState (the draw/touch switches would hit `default`
         // and leave the screen frozen with no recovery path).
-        const int kMaxKnownState = (int)STATE_WIFI_KEYBOARD;
+        // Last REAL persistable state — must be updated when adding new states.
+        // Sentinels (STATE_SLEEP_REQUEST onward) are intentionally rejected if
+        // persisted.
+        const int kMaxKnownState = (int)STATE_KOSYNC_PIN_PROMPT;
+        static_assert((int)STATE_KOSYNC_PIN_PROMPT + 1 == (int)STATE_SLEEP_REQUEST,
+                      "STATE_SLEEP_REQUEST must remain immediately after the last "
+                      "real persistable state. If you added a new persistable state, "
+                      "place it BEFORE STATE_SLEEP_REQUEST and update kMaxKnownState.");
         if (savedState < 0 || savedState > kMaxKnownState ||
             savedState == (int)STATE_BOOT) {
             Serial.printf("Wake: invalid savedState=%d, falling back to library\n", savedState);
