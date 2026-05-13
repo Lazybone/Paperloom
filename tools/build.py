@@ -34,6 +34,15 @@ CONFIG_H = REPO_ROOT / "include" / "config.h"
 README = REPO_ROOT / "README.md"
 BUILD_DIR = REPO_ROOT / "build"
 MANIFEST = REPO_ROOT / "site" / "flasher" / "manifest.json"
+SITE_MASTHEADS = (
+    REPO_ROOT / "site" / "index.html",
+    REPO_ROOT / "site" / "flasher" / "index.html",
+)
+# Matches the masthead version chip:  <strong>v0.2.1</strong> · …
+# Captures the wrapper so we only swap the semver, leaving HTML intact.
+MASTHEAD_VERSION_RE = re.compile(
+    r'(<strong>v)(\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?)(</strong>)'
+)
 PIO_BUILD_DIR = REPO_ROOT / ".pio" / "build" / "gh_release"
 PIO_BIN = PIO_BUILD_DIR / "firmware.bin"
 PIO_BOOTLOADER = PIO_BUILD_DIR / "bootloader.bin"
@@ -287,6 +296,35 @@ def bump_manifest_version(version: str, dry_run: bool) -> None:
     MANIFEST.write_text(json.dumps(data, indent=2) + "\n", encoding="utf-8")
 
 
+def bump_site_mastheads_version(version: str, dry_run: bool) -> None:
+    """Bump the visible version chip on the GitHub Pages hub + flasher pages.
+
+    The page mastheads carry a hardcoded <strong>vX.Y.Z</strong> next to the
+    section name. Without this bump the deployed site drifts behind the
+    firmware/manifest version and users see a stale chip on the install page.
+    """
+    for page in SITE_MASTHEADS:
+        if not page.is_file():
+            print(f"-> {page.relative_to(REPO_ROOT)}: missing, skipping")
+            continue
+
+        text = page.read_text(encoding="utf-8")
+        new_text, n = MASTHEAD_VERSION_RE.subn(
+            lambda m: f"{m.group(1)}{version}{m.group(3)}", text, count=1,
+        )
+        if n == 0:
+            print(f"-> {page.relative_to(REPO_ROOT)}: no <strong>vX.Y.Z</strong> match, skipping")
+            continue
+        if new_text == text:
+            print(f"-> {page.relative_to(REPO_ROOT)}: already at v{version}")
+            continue
+
+        print(f"-> {page.relative_to(REPO_ROOT)}: masthead -> v{version}")
+        if dry_run:
+            continue
+        page.write_text(new_text, encoding="utf-8")
+
+
 def publish_github_release(
     version: str,
     bin_paths: list[Path],
@@ -424,6 +462,7 @@ def main() -> int:
         bump_config_version(args.version, args.dry_run)
         bump_readme_version(args.version, args.dry_run)
         bump_manifest_version(args.version, args.dry_run)
+        bump_site_mastheads_version(args.version, args.dry_run)
 
     if not args.skip_build:
         build_firmware(args.version, args.dry_run)

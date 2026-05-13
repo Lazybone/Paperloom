@@ -44,9 +44,12 @@ void debug_trace_mark(const char* stage, const String& detail) {
     // would exhaust flash endurance during normal reading. Keep behind a
     // compile flag — only enable when chasing a specific reset bug.
     trace_write(stage, detail);
-#endif
     Serial.printf("DBGTRACE mark stage=%s detail=%s\n",
                   stage ? stage : "", detail.c_str());
+#else
+    (void)stage;
+    (void)detail;
+#endif
 }
 
 void debug_trace_clear() {

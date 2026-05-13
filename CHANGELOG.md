@@ -4,6 +4,32 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+### Fixed
+- Web flasher: fix the post-install **Logs** panel collapsing every line
+  onto a single paragraph with the wrong colour scheme. esp-web-tools
+  attaches an open shadow root on each of its custom elements (the
+  install dialog, `ewt-console`, every `ew-*` button) and injects its
+  scoped CSS as an inline `<style>` via `shadowRoot.innerHTML`. The
+  flasher CSP only allowed `style-src 'self'`, so those `<style>`
+  blocks were blocked: the dark `:host` terminal styling and the
+  `.log { white-space: pre-wrap }` rule that turns `\n` into line breaks
+  never applied. Relaxed `style-src` to `'self' 'unsafe-inline'` (matches
+  the optimizer page). Trade-off is bounded — the inline styles only
+  exist inside the third-party shadow trees and don't widen the page's
+  own surface.
+- Silence `DBGTRACE mark stage=…` Serial spam in normal builds. The
+  marker was instrumentation for chasing a reset bug; the NVS write
+  was already gated behind `-DDEBUG_TRACE_NVS`, but the Serial
+  `printf` next to it fired unconditionally and showed up on the web
+  flasher's serial console after install. Both are now gated together.
+  Boot crash trace (`debug_trace_boot_report`) still prints, so
+  recovering the last stage after a panic continues to work.
+- Bump the visible page version chip on the GitHub Pages hub
+  (`site/index.html`) and the flasher (`site/flasher/index.html`)
+  to match the firmware version. `tools/build.py` now sweeps both
+  mastheads alongside `manifest.json` and `README.md`, so the deployed
+  site no longer drifts behind on the next release.
+
 ## v0.2.2 — 2026-05-13
 
 ### Added

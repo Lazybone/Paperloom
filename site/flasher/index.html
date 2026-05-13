@@ -12,6 +12,15 @@
     Content-Security-Policy notes:
     - esp-web-tools is self-hosted under ./vendor/esp-web-tools/. No third-party
       script origins, so script-src is just 'self'.
+    - style-src includes 'unsafe-inline' because every esp-web-tools custom
+      element (ewt-install-dialog, ewt-console, ew-*-button, ew-checkbox …)
+      attaches an open shadow root and injects its scoped CSS as an inline
+      <style> via shadowRoot.innerHTML. Without 'unsafe-inline' those <style>
+      blocks are blocked by CSP: the post-install "Logs" panel loses its
+      dark terminal look, .log { white-space: pre-wrap } never applies, and
+      every log line collapses onto a single flowing paragraph. The styles
+      are scoped to the component's shadow tree, so the trade-off is bounded
+      to the third-party UI and doesn't widen the page's own surface.
     - connect-src is 'self' only. The firmware binary is mirrored
       same-origin under ./firmware/Paperloom-merged.bin (refreshed by
       tools/build.py on every release). github.com release-download
@@ -22,7 +31,7 @@
     - worker-src includes blob: because esp-web-tools spawns the flashing worker
       from a blob URL it constructs at runtime.
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self'; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
 
   <link rel="stylesheet" href="../shared/fonts.css" />
   <link rel="stylesheet" href="../shared/design.css" />
@@ -54,7 +63,7 @@
       <div class="masthead-meta">
         <a href="../" class="back-link" aria-label="Back to Paperloom hub">Back to hub</a>
         <span aria-hidden="true"> · </span>
-        <strong>v0.2.1</strong> · Firmware installer
+        <strong>v0.2.2</strong> · Firmware installer
       </div>
     </header>
 
