@@ -4,6 +4,8 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+## v0.2.1 — 2026-05-12
+
 ### Fixed
 - OTA update check no longer fails silently after GitHub rotated its CA
   chain. `api.github.com` now serves through Sectigo / USERTrust ECC and

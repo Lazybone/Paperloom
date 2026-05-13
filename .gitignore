@@ -57,4 +57,5 @@ desktop.ini
 
 # ─── Claude Code ─────────────────────────────────────────────────────
 .claude/
+.codewright/
 CLAUDE.md
