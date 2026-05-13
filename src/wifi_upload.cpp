@@ -5,6 +5,7 @@
 #include "frontlight.h"
 #include "button_action.h"
 #include "reader.h"
+#include "kosync_http_handlers.h"  // WP-6a: /api/kosync-settings endpoints
 #include <WiFi.h>
 #include <WebServer.h>
 #include <SD.h>
@@ -435,6 +436,34 @@ static const char UPLOAD_HTML[] PROGMEM = R"rawliteral(
           </div>
           <p class="hint">Leave blank to keep the current password.</p>
         </div>
+      </div>
+
+      <div class="card-section">
+        <div class="sec-head">
+          <svg class="sec-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0z"/><path d="M3 12h18M12 3a14 14 0 0 1 0 18M12 3a14 14 0 0 0 0 18"/></svg>
+          <h2>KoSync</h2>
+        </div>
+        <fieldset style="border:0;padding:0;margin:0;">
+          <legend style="position:absolute;left:-9999px;">KoSync</legend>
+          <div class="field">
+            <label for="kosyncServer">Server URL</label>
+            <input id="kosyncServer" type="text" placeholder="https://kosync.eu" maxlength="256" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="field">
+            <label for="kosyncUser">Username</label>
+            <input id="kosyncUser" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+          </div>
+          <div class="field">
+            <label for="kosyncPassword">Password</label>
+            <input id="kosyncPassword" type="password" maxlength="128" placeholder="••••••••" autocomplete="new-password">
+            <p class="hint">Hashed on the device — the plaintext is never stored or echoed back.</p>
+          </div>
+          <div class="field">
+            <label for="kosyncDeviceName">Device name</label>
+            <input id="kosyncDeviceName" type="text" maxlength="32" autocomplete="off" spellcheck="false">
+          </div>
+          <button type="button" class="btn brand" onclick="saveKosync()">Save KoSync</button>
+        </fieldset>
       </div>
 
       <div class="card-section">
@@ -947,6 +976,45 @@ async function loadSettings() {
     markClean();
   } catch (e) { toast(e.message, true); }
   suppressDirty = false;
+  // WP-6a: pull KoSync card state alongside the main settings.
+  loadKosync();
+}
+
+async function loadKosync() {
+  try {
+    const r = await fetch('/api/kosync-settings');
+    const j = await r.json();
+    if (!j || !j.ok) return;
+    // .value setter only — never innerHTML — for server-supplied strings.
+    document.getElementById('kosyncServer').value     = j.server     || '';
+    document.getElementById('kosyncUser').value       = j.user       || '';
+    document.getElementById('kosyncDeviceName').value = j.deviceName || '';
+    // Password input is never pre-filled (the device only stores the MD5).
+    document.getElementById('kosyncPassword').value   = '';
+  } catch (e) { console.error('loadKosync', e); }
+}
+
+async function saveKosync() {
+  const body = {
+    server:     document.getElementById('kosyncServer').value,
+    user:       document.getElementById('kosyncUser').value,
+    password:   document.getElementById('kosyncPassword').value,
+    deviceName: document.getElementById('kosyncDeviceName').value
+  };
+  try {
+    const r = await fetch('/api/kosync-settings', {
+      method: 'POST',
+      headers: {'Content-Type':'application/json'},
+      body: JSON.stringify(body)
+    });
+    const j = await r.json();
+    if (j && j.ok) {
+      toast('KoSync saved');
+      document.getElementById('kosyncPassword').value = '';
+    } else {
+      toast('KoSync failed: ' + ((j && j.error) || 'unknown'), true);
+    }
+  } catch (e) { toast(e.message, true); }
 }
 
 async function saveSettings() {
@@ -1598,6 +1666,9 @@ void wifi_upload_handle() {
             _server.on("/api/upload",   HTTP_POST, handleApiUploadComplete, handleApiUploadData);
             _server.on("/api/settings", HTTP_GET,  handleApiSettingsGet);
             _server.on("/api/settings", HTTP_POST, handleApiSettingsPost);
+            // WP-6a: KoSync settings endpoints. Registered last so the seam
+            // for the WP-6c PIN gate stays inside kosync_http_handlers.cpp.
+            kosync_http_register_handlers(_server);
             _server.begin();
 
             _running = true;
