@@ -21,7 +21,9 @@
 //   Function signatures end up declaring/defining `HostEpdRect` parameters,
 //   but at the ABI level the calls from display.cpp (which sees `EpdRect`)
 //   are byte-for-byte identical.
+#include <Arduino.h>  // millis()
 #include <string.h>   // memset for direct hl_state buffer reset
+#include "esp_task_wdt.h"
 
 #define EpdRect HostEpdRect
 #include "epd_backend.h"
@@ -46,11 +48,44 @@ static EpdiyHighlevelState hl_state;
 // board behaves differently.
 static constexpr uint16_t PRO_VCOM_MV = 2400;
 
-// Ambient temperature passthrough constant. The Pro board's TPS65185 reports
-// real temperature via epd_ambient_temperature(); for simplicity (and because
-// our display.cpp does not currently pipe temperature data through the
-// backend), we pass a sensible default per upstream examples.
+// Fallback ambient temperature used when (a) the caller passes
+// EPD_BE_DEFAULT_TEMP_C and we have no cached real reading yet, or (b) the
+// TPS65185 temperature sensor returns out-of-range / fails. 25 °C matches
+// the upstream epdiy examples and is the room-temperature design point of
+// the waveform LUTs.
 static constexpr int DEFAULT_TEMPERATURE_C = 25;
+
+// Temperature cache. epd_ambient_temperature() does an I2C transaction on
+// the TPS65185 every call (~1-2 ms); for partial-update bursts that fire
+// many draws per second we amortize via a short TTL cache and reuse the
+// last sane reading on transient sensor errors.
+static constexpr unsigned long TEMPERATURE_CACHE_TTL_MS = 2000;
+static int           s_cached_temp_c     = DEFAULT_TEMPERATURE_C;
+static unsigned long s_temp_cache_at_ms  = 0;
+static bool          s_temp_cache_valid  = false;
+
+int epd_be_get_ambient_temp_cached() {
+    const unsigned long now = millis();
+    if (s_temp_cache_valid &&
+        (now - s_temp_cache_at_ms) < TEMPERATURE_CACHE_TTL_MS) {
+        return s_cached_temp_c;
+    }
+
+    // epd_ambient_temperature() returns float; the V7 board reads via the
+    // TPS65185's on-chip sensor. On sensor failure upstream returns 0.0 or
+    // 21.0 (no-sensor fallback) — both within range, so we additionally
+    // sanity-clamp to a believable e-paper operating envelope.
+    const float raw = epd_ambient_temperature();
+    const int   t   = (int)raw;
+    if (t >= -20 && t <= 70) {
+        s_cached_temp_c = t;
+    }
+    // On out-of-range: keep the previous s_cached_temp_c (cold-boot init
+    // value is DEFAULT_TEMPERATURE_C, so we never feed garbage downstream).
+    s_temp_cache_at_ms = now;
+    s_temp_cache_valid = true;
+    return s_cached_temp_c;
+}
 
 void epd_be_init() {
     epd_init(&epd_board_v7, &ED047TC1, EPD_OPTIONS_DEFAULT);
@@ -78,11 +113,25 @@ void epd_be_clear() {
 void epd_be_clear_area_cycles(HostEpdRect area, int32_t cycles, int32_t cycle_time) {
     ::EpdRect a = { (int)area.x, (int)area.y, (int)area.width, (int)area.height };
 
+    // Long clear cycles can approach the task-WDT threshold under stress
+    // (6 cycles × ~50 ms baseline = ~300 ms, growing with cycle_time and
+    // larger clear regions). Feed the watchdog defensively around the
+    // blocking lib call. esp_task_wdt_status(NULL) is ESP_OK only when
+    // the current task is subscribed to the TWDT — guard the reset so we
+    // don't trip ESP_ERR_NOT_FOUND on non-subscribed tasks.
+    if (esp_task_wdt_status(NULL) == ESP_OK) {
+        esp_task_wdt_reset();
+    }
+
     // Always do the actual cycle-clearing — display.cpp's caller asked for a
     // specific number of flashes (6 for full refresh, 1 for fast). epdiy's
     // higher-level epd_fullclear() ignores that count and only does a single
     // panel flash, which leaves visible ghosting on the Pro panel.
     epd_clear_area_cycles(a, (int)cycles, (int)cycle_time);
+
+    if (esp_task_wdt_status(NULL) == ESP_OK) {
+        esp_task_wdt_reset();
+    }
 
     // For a full-screen clear, sync BOTH hl_state framebuffers to all-white.
     // front_fb is the draw buffer; back_fb is epdiy's model of "what the
@@ -100,16 +149,25 @@ void epd_be_clear_area_cycles(HostEpdRect area, int32_t cycles, int32_t cycle_ti
     }
 }
 
-void epd_be_draw_grayscale_image(HostEpdRect area, uint8_t *data) {
+void epd_be_draw_grayscale_image(HostEpdRect area, uint8_t *data,
+                                 int mode, int temp_c) {
     ::EpdRect a = { (int)area.x, (int)area.y, (int)area.width, (int)area.height };
     epd_copy_to_framebuffer(a, data, epd_hl_get_framebuffer(&hl_state));
+
+    // Resolve header-level sentinels to backend defaults. The header
+    // intentionally does not expose EpdDrawMode (that lives in epdiy.h),
+    // so callers signal "default" via EPD_BE_DEFAULT_MODE / -TEMP_C.
+    const EpdDrawMode resolved_mode =
+        (mode == EPD_BE_DEFAULT_MODE) ? MODE_GC16 : (EpdDrawMode)mode;
+    const int resolved_temp =
+        (temp_c == EPD_BE_DEFAULT_TEMP_C) ? DEFAULT_TEMPERATURE_C : temp_c;
 
     const int fw = epd_width();
     const int fh = epd_height();
     if (a.x == 0 && a.y == 0 && a.width == fw && a.height == fh) {
-        epd_hl_update_screen(&hl_state, MODE_GC16, DEFAULT_TEMPERATURE_C);
+        epd_hl_update_screen(&hl_state, resolved_mode, resolved_temp);
     } else {
-        epd_hl_update_area(&hl_state, MODE_GC16, DEFAULT_TEMPERATURE_C, a);
+        epd_hl_update_area(&hl_state, resolved_mode, resolved_temp, a);
     }
 }
 
