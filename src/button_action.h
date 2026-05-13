@@ -15,8 +15,11 @@ enum ButtonAction : uint8_t {
     BTN_ACTION_NEXT_PAGE        = 4,  // Reader: next page
     BTN_ACTION_PREV_PAGE        = 5,  // Reader: previous page
     BTN_ACTION_MENU             = 6,  // Reader: open menu overlay
+    // WP-8: trigger kosync sync (manual). Action body in button_action.cpp
+    // routes to coordinator.
+    BTN_ACTION_KOSYNC_SYNC      = 7,  // Trigger manual KoSync progress sync
 
-    BTN_ACTION_COUNT                  // sentinel; not a real action
+    BTN_ACTION_COUNT            = 8   // sentinel; not a real action
 };
 
 // Human-readable label for a given action (for settings UI).
@@ -25,3 +28,9 @@ const char* button_action_name(uint8_t action);
 // Execute the action. No-op for BTN_ACTION_NONE or unknown values.
 // Safe to call from main loop context.
 void button_action_execute(uint8_t action);
+
+// WP-8: Public helper that mirrors the reader-menu "Sync Fortschritt" flow.
+// Runs the precheck → coordinator.syncNow() → toast / conflict-state branch.
+// Safe to call from main loop context (e.g. from button_action_execute()'s
+// dispatcher in main.cpp). Defined in button_action.cpp.
+void button_action_kosync_sync();

@@ -845,7 +845,8 @@ const BUTTON_ACTIONS = [
   {v: 3, label: 'Sleep'},
   {v: 4, label: 'Next page'},
   {v: 5, label: 'Prev page'},
-  {v: 6, label: 'Menu'}
+  {v: 6, label: 'Menu'},
+  {v: 7, label: 'Sync Fortschritt'}
 ];
 
 function populateButtonActionSelects() {
