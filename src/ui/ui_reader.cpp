@@ -99,6 +99,15 @@ static int  s_lastBatteryPct = -1;
 static bool s_lastBookmark   = false;
 static bool s_zoneCacheValid = false;
 
+// Set by overlay-close touch handlers (Menu/TOC/Bookmarks/GoTo back→Reader)
+// so the next ui_reader_draw() repaints ALL three reader zones, not just
+// body+footer. The overlay full-screen draw clobbered the panel's header
+// pixels, so without this flag the EPD would keep showing the overlay's
+// title bar until something forces the header rect to flush again
+// (battery-percent delta, bookmark toggle, chapter jump's first header
+// delta). Consumed-and-cleared by ui_reader_draw().
+static bool s_overlayDismissed = false;
+
 static void invalidate_zone_cache() {
     s_lastBatteryPct = -1;
     s_lastBookmark   = false;
@@ -306,6 +315,17 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
         headerDirty = bodyDirty = footerDirty = true;
         headerKind = bodyKind = footerKind = ChangeKind::WakeFull;
         invalidate_zone_cache();
+    } else if (s_overlayDismissed) {
+        // Back-from-overlay (Menu/TOC/Bookmarks/GoTo "Back to Reading").
+        // The overlay had painted Zone::FullScreen via StructuralRedraw,
+        // so the panel currently shows the overlay's pixels across the
+        // header rect too. Force all three reader zones dirty with
+        // StructuralRedraw (GL16, no flash) so the reader's chrome
+        // returns cleanly. Cache invalidated so the header re-establishes
+        // its delta baseline from authoritative sources on this frame.
+        headerDirty = bodyDirty = footerDirty = true;
+        headerKind = bodyKind = footerKind = ChangeKind::StructuralRedraw;
+        invalidate_zone_cache();
     } else if (refresh.chapterJump) {
         // Chapter boundary — body content changes substantially. Force
         // StructuralRedraw on body+footer (page-number block changes).
@@ -402,6 +422,8 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
             refresh.pageTurnsSinceFull = 0;
         }
     }
+    // Consumed: overlay-dismissal one-shot only applies to this frame.
+    s_overlayDismissed = false;
     setNeedsRedraw(false);
     debug_trace_mark("ui_reader_draw:done");
 }
@@ -454,6 +476,15 @@ AppState ui_reader_touch(int x, int y, bool isLongPress,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_menu_draw(BookReader& reader) {
+    // Menu is currently rendered as a full-screen overlay (it paints
+    // every row from y=80 to the bottom hint). Migrated to the intent
+    // API: Zone::FullScreen + StructuralRedraw → GL16 non-flashing
+    // partial across the whole panel, no 6-cycle clear. The matching
+    // close path (ui_reader_menu_touch → STATE_READER) sets
+    // s_overlayDismissed so the next reader draw repaints all three
+    // zones cleanly.
+    display_begin_frame();
+
     display_set_font_size(2);  // chrome always in Inter
     display_fill_screen(15);
 
@@ -551,7 +582,8 @@ void ui_reader_menu_draw(BookReader& reader) {
     }
     display_draw_text((W - hw) / 2, H - 100, hint, 10);
 
-    display_update_fast();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     setNeedsRedraw(false);
 }
 
@@ -570,6 +602,13 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
         if (reader.hasNavigationHistory()) {
             if (row == 0) {
                 reader.goBackInHistory();
+                // History jump may land mid-chapter: mark as a chapter
+                // jump so the reader draw gives body+footer the
+                // StructuralRedraw they need, and flag the overlay
+                // dismissal so the header rect (currently showing the
+                // menu's title bar pixels) is repainted too.
+                refresh.chapterJump = true;
+                s_overlayDismissed = true;
                 setNeedsRedraw(true);
                 return STATE_READER;
             }
@@ -601,11 +640,20 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
 
     // Tap outside menu items → back to reader
     refresh.fastRefresh = false;
+    s_overlayDismissed = true;
     setNeedsRedraw(true);
     return STATE_READER;
 }
 
 void ui_reader_goto_draw(BookReader& reader) {
+    // Go-to picker is a full-screen overlay (header + value + nudge
+    // buttons + bottom bar). Was display_update_medium() → 6-cycle
+    // GC16 clear via the WP-0.2 shim (visible flash on every nudge tap
+    // and on open). Migrated to Zone::FullScreen + StructuralRedraw,
+    // which is GL16 non-flashing. The close paths set s_overlayDismissed
+    // so the reader's chrome returns cleanly.
+    display_begin_frame();
+
     display_set_font_size(2);  // chrome always in Inter
     display_fill_screen(15);
     drawHeader("Go to...", true);
@@ -638,7 +686,8 @@ void ui_reader_goto_draw(BookReader& reader) {
     display_draw_text((W - gw) / 2, 520, goLbl, 4);
 
     drawBottomBar("[ Back to Reading ]");
-    display_update_medium();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     setNeedsRedraw(false);
 }
 
@@ -646,6 +695,7 @@ AppState ui_reader_goto_touch(int x, int y, BookReader& reader,
                               ReaderRefreshState& refresh) {
     if (y > H - FOOTER_HEIGHT) {
         refresh.fastRefresh = false;
+        s_overlayDismissed = true;
         setNeedsRedraw(true);
         return STATE_READER;
     }
@@ -673,6 +723,7 @@ AppState ui_reader_goto_touch(int x, int y, BookReader& reader,
         refresh.fastRefresh = false;
         refresh.chapterJump = jumped;
         refresh.pageTurnsSinceFull = 0;
+        s_overlayDismissed = true;
         setNeedsRedraw(true);
         return STATE_READER;
     }
@@ -685,6 +736,15 @@ AppState ui_reader_goto_touch(int x, int y, BookReader& reader,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_toc_draw(BookReader& reader, int& tocScroll) {
+    // TOC is a full-screen overlay (header + list rows + scroll
+    // indicator + bottom bar). Was display_update_medium() → 6-cycle
+    // GC16 clear via the WP-0.2 shim (visible flash on every open and
+    // every Prev/Next scroll). Now Zone::FullScreen + StructuralRedraw
+    // → GL16 non-flashing. The close paths set s_overlayDismissed; the
+    // TOC item-select path additionally drives a chapter jump which
+    // already invalidates body/footer.
+    display_begin_frame();
+
     display_set_font_size(2);  // chrome always in Inter
     display_fill_screen(15);
     drawHeader("Table of Contents", true);
@@ -760,7 +820,8 @@ void ui_reader_toc_draw(BookReader& reader, int& tocScroll) {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    display_update_medium();  // 2-cycle refresh — clean transition without long flash
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     setNeedsRedraw(false);
 }
 
@@ -769,6 +830,7 @@ AppState ui_reader_toc_touch(int x, int y, BookReader& reader,
     // Footer → back to reader
     if (y > H - FOOTER_HEIGHT) {
         refresh.fastRefresh = false;
+        s_overlayDismissed = true;
         setNeedsRedraw(true);
         return STATE_READER;
     }
@@ -801,16 +863,19 @@ AppState ui_reader_toc_touch(int x, int y, BookReader& reader,
             // (ZIP decompression + HTML strip + text wrap). Without this, the TOC
             // screen stays visible while the CPU works, then the EPD goes blank for
             // the 6-cycle clear, making it look like a freeze/wedge.
+            display_begin_frame();
             display_set_font_size(2);  // overlay text in UI font
             display_fill_screen(15);
             const char* loadMsg = "Loading chapter...";
             int loadW = display_text_width(loadMsg);
             display_draw_text((W - loadW) / 2, H / 2, loadMsg, 6);
-            display_update_fast();
+            display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+            display_flush();
 
             refresh.fastRefresh = false;
             refresh.chapterJump = true;
             refresh.pageTurnsSinceFull = 0;
+            s_overlayDismissed = true;
             reader.jumpToChapter(chapterIndex, true);
 
             setNeedsRedraw(true);
@@ -826,6 +891,13 @@ AppState ui_reader_toc_touch(int x, int y, BookReader& reader,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_bookmarks_draw(BookReader& reader, int& bmScroll) {
+    // Bookmarks list is a full-screen overlay (same layout as TOC).
+    // Was display_update_medium() → 6-cycle GC16 clear via shim. Now
+    // Zone::FullScreen + StructuralRedraw → GL16 non-flashing. The
+    // close paths set s_overlayDismissed so reader chrome returns
+    // cleanly; bookmark-tap path additionally drives chapter jump.
+    display_begin_frame();
+
     display_set_font_size(2);  // chrome always in Inter
     display_fill_screen(15);
     drawHeader("Bookmarks", true);
@@ -879,7 +951,8 @@ void ui_reader_bookmarks_draw(BookReader& reader, int& bmScroll) {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    display_update_medium();  // 2-cycle refresh — clean transition without long flash
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     setNeedsRedraw(false);
 }
 
@@ -888,6 +961,7 @@ AppState ui_reader_bookmarks_touch(int x, int y, BookReader& reader,
     // Footer → back
     if (y > H - FOOTER_HEIGHT) {
         refresh.fastRefresh = false;
+        s_overlayDismissed = true;
         setNeedsRedraw(true);
         return STATE_READER;
     }
@@ -923,16 +997,19 @@ AppState ui_reader_bookmarks_touch(int x, int y, BookReader& reader,
                 // Tap bookmark → jump to it
                 // Show loading indicator immediately so the user knows the device
                 // is working (ZIP decompression can take several seconds).
+                display_begin_frame();
                 display_set_font_size(2);  // overlay text in UI font
                 display_fill_screen(15);
                 const char* loadMsg = "Loading chapter...";
                 int loadW = display_text_width(loadMsg);
                 display_draw_text((W - loadW) / 2, H / 2, loadMsg, 6);
-                display_update_fast();
+                display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+                display_flush();
 
                 refresh.fastRefresh = false;
                 refresh.chapterJump = true;
                 refresh.pageTurnsSinceFull = 0;
+                s_overlayDismissed = true;
                 if (!reader.jumpToBookmark(idx)) {
                     Serial.println("Bookmark jump failed, staying in reader");
                 }
