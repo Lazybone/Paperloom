@@ -155,9 +155,19 @@ static int _framesSinceFullRefresh = 0;
 [[maybe_unused]] static constexpr unsigned long POWER_HOLD_WINDOW_MS = 80;
 static unsigned long _lastPoweroffMs = 0;
 
-// Per-flush verbose logging (one Serial line per dirty zone). Default
-// off to keep the serial log readable on real-device tuning sessions;
-// flip to 1 when characterizing waveform/mode behavior per zone.
+// Per-flush summary logging — one Serial line per real flush. Default
+// off because Serial.printf at 115200 baud costs ~5 ms blocking per
+// flush, which is real overhead during fast page-turning and OTA.
+// Flip to 1 when characterizing waveform/mode behavior or anti-ghost
+// cadence on the bench.
+#ifndef DISPLAY_FLUSH_LOG
+#define DISPLAY_FLUSH_LOG 0
+#endif
+
+// Per-flush verbose logging (one Serial line per dirty zone). Implies
+// DISPLAY_FLUSH_LOG — the verbose lines have no context without the
+// summary. Default off to keep the serial log readable on real-device
+// tuning sessions; flip to 1 when characterizing per-zone waveforms.
 #ifndef DISPLAY_FLUSH_VERBOSE_LOG
 #define DISPLAY_FLUSH_VERBOSE_LOG 0
 #endif
@@ -550,6 +560,13 @@ void display_update_sleep() {
 // working unchanged. WP-1+ will migrate call sites to explicit
 // display_mark_dirty(Zone, ChangeKind) so the right waveform is chosen
 // per surface.
+//
+// Each shim is marked [[deprecated]] in display.h so remaining call
+// sites show a build warning. The definitions below intentionally
+// suppress that warning locally — only call sites should warn, not the
+// implementations themselves.
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
 
 void display_update() {
     // Wake-from-sleep / heavy clean: forces a GC16 full refresh with
@@ -671,6 +688,8 @@ void display_update_mode(bool fullRefresh) {
     }
 }
 
+#pragma GCC diagnostic pop
+
 // ─── Intent-based partial-update core ─────────────────────────────────
 
 // Strength ranking used by display_mark_dirty() to merge multiple marks
@@ -749,6 +768,22 @@ void display_force_full_refresh() {
     // this — see the warning in display.h. If you need to flush an
     // already-marked frame through the full-clear path, mark at least
     // one zone with WakeFull and call display_flush() directly.
+    //
+    // Diagnostic entry check: warn if zones are already dirty on entry,
+    // because the begin_frame() below would silently discard those marks
+    // and the caller almost certainly intended for them to ship. This
+    // helper is rare enough (only called from sleep-wake / hard refresh
+    // paths) that an unconditional Serial.printf has negligible cost.
+    for (int i = 0; i < (int)Zone::_Count; i++) {
+        if (_zones[i].dirty) {
+            Serial.printf("[FORCE] WARN: zone %s dirty on entry — pre-marks"
+                          " will be discarded by begin_frame. Mark"
+                          " WakeFull and call display_flush() directly"
+                          " instead.\n",
+                          zone_name((Zone)i));
+            break;
+        }
+    }
     display_begin_frame();
     display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
     display_flush();
@@ -824,7 +859,18 @@ void display_flush() {
         for (int i = 0; i < (int)Zone::_Count; i++) {
             if (!_zones[i].dirty) continue;
             ZoneState& z = _zones[i];
-            if (z.w <= 0 || z.h <= 0) continue;
+            if (z.w <= 0 || z.h <= 0) {
+#if DISPLAY_FLUSH_LOG || DISPLAY_FLUSH_VERBOSE_LOG
+                // Most common cause: Zone::Overlay was marked dirty but
+                // the caller forgot display_set_overlay_rect() this frame
+                // (the rect is reset to empty after every flush).
+                if ((Zone)i == Zone::Overlay) {
+                    Serial.printf("[FLUSH] WARN: Zone::Overlay dirty but rect empty"
+                                  " — did you forget display_set_overlay_rect()?\n");
+                }
+#endif
+                continue;
+            }
 
             const int mode = changekind_to_mode(z.intent);
 
@@ -855,7 +901,9 @@ void display_flush() {
     // One summary line per real flush. The counter logged below is the
     // pre-update value (how many partials had accumulated entering this
     // flush) so a "frames_since_full=6 full=1" line means "the 6-frame
-    // anti-ghost backstop just fired".
+    // anti-ghost backstop just fired". Gated behind DISPLAY_FLUSH_LOG
+    // because Serial.printf at 115200 baud is ~5 ms blocking per flush.
+#if DISPLAY_FLUSH_LOG || DISPLAY_FLUSH_VERBOSE_LOG
     int _flush_dirty = 0;
     for (int i = 0; i < (int)Zone::_Count; i++) {
         if (_zones[i].dirty) _flush_dirty++;
@@ -866,6 +914,9 @@ void display_flush() {
                   isFullRefresh ? 1 : 0,
                   _framesSinceFullRefresh,
                   _flush_t1 - _flush_t0);
+#else
+    (void)_flush_t0;
+#endif
 #if DISPLAY_FLUSH_VERBOSE_LOG
     for (int i = 0; i < (int)Zone::_Count; i++) {
         if (!_zones[i].dirty) continue;
