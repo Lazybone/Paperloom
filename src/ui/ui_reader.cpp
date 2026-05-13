@@ -62,85 +62,126 @@ static void adjustGotoValue(BookReader& reader, int delta) {
 extern void setNeedsRedraw(bool val);
 
 // ═══════════════════════════════════════════════════════════════════
-// Reader screen
+// Reader screen — three-zone partial-update layout
 // ═══════════════════════════════════════════════════════════════════
+//
+// The reader paints into three fixed zones whose rects mirror the
+// table in display.cpp:
+//
+//   ReaderHeader : (0,   0, 540,  66)
+//   ReaderBody   : (0,  82, 540, 828)
+//   ReaderFooter : (0, 910, 540,  50)
+//
+// Per-frame the top-level draw decides which of the three zones is
+// actually dirty (battery delta / bookmark toggle = header only; page
+// turn = body + footer; chapter jump = body + footer Structural; wake
+// or anti-ghost = all three full). Only dirty zones are repainted in
+// the portrait framebuffer, and only those rects are pushed to the
+// EPD by display_flush() / display_force_full_refresh().
+//
+// Critically: each zone-draw helper paints ONLY inside its own rect.
+// Out-of-zone writes would corrupt neighbour zones across frames
+// because the framebuffer persists between flushes.
+//
+// Reader-zone tiling sanity check — mirrors the assert in display.cpp
+// but keeps the two files honest if either drifts.
+static_assert(HEADER_HEIGHT == 66, "Header height mismatch with zone table");
+static_assert(FOOTER_HEIGHT == 50, "Footer height mismatch with zone table");
+static_assert(HEADER_HEIGHT + MARGIN_Y + 828 + FOOTER_HEIGHT == PORTRAIT_H,
+              "Reader zones must tile portrait height (header + gap + body + footer)");
 
-void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
-    debug_trace_mark("ui_reader_draw:start", String(reader.getCurrentChapter()) + ":" + String(reader.getCurrentPage()));
-    const Settings& s = settings_get();
-    debug_trace_mark("ui_reader_draw:got_settings");
-    int level = s.fontSizeLevel;
-    if (level < 0) level = 0;
-    if (level >= FONT_SIZE_LEVEL_COUNT) level = FONT_SIZE_LEVEL_COUNT - 1;
-    // Reader margins follow the per-size table, but UI chrome (header,
-    // footer, page numbers) renders in the UI font (Inter) regardless of
-    // the reader-family selection — see issue/Inter UI split.
-    int marginX = FONT_MARGIN_X_VALUES[level];
-    uint8_t spacingLevel = s.lineSpacingLevel;
-    if (spacingLevel >= LINE_SPACING_LEVEL_COUNT) spacingLevel = 2;
+// ─── Zone-local state for delta detection ──────────────────────────
+// Cached so we only mark the header dirty when something visible
+// actually changed (battery percent or bookmark flag). On wake /
+// anti-ghost full refresh the cache is invalidated so the next draw
+// re-reads from authoritative sources.
+static int  s_lastBatteryPct = -1;
+static bool s_lastBookmark   = false;
+static bool s_zoneCacheValid = false;
 
-    display_fill_screen(15);
-    debug_trace_mark("ui_reader_draw:after_fill_screen");
+static void invalidate_zone_cache() {
+    s_lastBatteryPct = -1;
+    s_lastBookmark   = false;
+    s_zoneCacheValid = false;
+}
+
+// ─── Header zone (0, 0, 540, 66) ───────────────────────────────────
+// Title (+ optional "* " bookmark marker), battery percentage, and the
+// thin divider at y=62 (= HEADER_HEIGHT - 4). All writes stay inside
+// y ∈ [0, 66).
+static void ui_reader_draw_header_zone(BookReader& reader, const Settings& s,
+                                       int marginX) {
+    // Clear only the header rect; the body/footer rects keep their
+    // previous framebuffer content.
+    display_draw_filled_rect(0, 0, PORTRAIT_W, HEADER_HEIGHT, 15);
 
     // Header in UI font (Inter), not the reader family.
     display_set_font_size(2);
 
-    // Minimal header — anchored to HEADER_HEIGHT
-    {
-        int headerBaseline = HEADER_HEIGHT - 18;
+    int headerBaseline = HEADER_HEIGHT - 18;  // 48 — glyphs ascend above
 
-        String title = reader.getTitle();
-        // Truncate title by pixel width to fit with battery and bookmark indicator
-        String headerStr;
-        if (reader.isCurrentPageBookmarked()) {
-            headerStr = "* ";
-        }
-
-        int maxTitleW = W - marginX * 2;
-        if (s.showBattery) maxTitleW -= 80;  // reserve space for battery
-        if (headerStr.length() > 0) maxTitleW -= display_text_width(headerStr.c_str());
-
-        while (title.length() > 3 &&
-               display_text_width(title.c_str()) > maxTitleW) {
-            title = title.substring(0, title.length() - 4) + "...";
-        }
-        headerStr += title;
-
-        display_draw_text(marginX, headerBaseline, headerStr.c_str(), 0);
-
-        if (s.showBattery) {
-            char battStr[8];
-            snprintf(battStr, sizeof(battStr), "%d%%", battery_percent());
-            int bw = display_text_width(battStr);
-            display_draw_text(W - marginX - bw, headerBaseline, battStr, 0);
-        }
-
-        display_draw_hline(marginX, HEADER_HEIGHT - 4, W - marginX * 2, 13);
+    String title = reader.getTitle();
+    String headerStr;
+    if (reader.isCurrentPageBookmarked()) {
+        headerStr = "* ";
     }
-    debug_trace_mark("ui_reader_draw:after_header");
 
-    // Switch to the reader font for body text.  Pagination was already
+    int maxTitleW = PORTRAIT_W - marginX * 2;
+    if (s.showBattery) maxTitleW -= 80;  // reserve space for battery
+    if (headerStr.length() > 0) maxTitleW -= display_text_width(headerStr.c_str());
+
+    while (title.length() > 3 &&
+           display_text_width(title.c_str()) > maxTitleW) {
+        title = title.substring(0, title.length() - 4) + "...";
+    }
+    headerStr += title;
+
+    display_draw_text(marginX, headerBaseline, headerStr.c_str(), 0);
+
+    if (s.showBattery) {
+        char battStr[8];
+        snprintf(battStr, sizeof(battStr), "%d%%", battery_percent());
+        int bw = display_text_width(battStr);
+        display_draw_text(PORTRAIT_W - marginX - bw, headerBaseline, battStr, 0);
+    }
+
+    // Divider sits one row above the zone bottom (y=62, in [0,66)).
+    display_draw_hline(marginX, HEADER_HEIGHT - 4, PORTRAIT_W - marginX * 2, 13);
+}
+
+// ─── Body zone (0, 82, 540, 828) ───────────────────────────────────
+// Wrapped text lines + inline images. The first baseline sits at
+// bodyTop + fontAscender which is well inside the zone, and the bottom
+// guard (bodyBottom = H - FOOTER_HEIGHT - 2 = 908) prevents the body
+// from spilling into the footer rect.
+static void ui_reader_draw_body_zone(BookReader& reader, const Settings& s,
+                                     int marginX, uint8_t spacingLevel) {
+    // Zone rect: y ∈ [82, 910). Wipe only that band.
+    const int bodyY = HEADER_HEIGHT + MARGIN_Y;       // 82
+    const int bodyH = PORTRAIT_H - bodyY - FOOTER_HEIGHT;  // 828
+    display_draw_filled_rect(0, bodyY, PORTRAIT_W, bodyH, 15);
+
+    // Switch to the reader font for body text. Pagination was already
     // computed against this font in BookReader::recalculateLayout(), so
-    // the metrics here must match — body draws use display_font_height()
+    // metrics here must match — body draws use display_font_height()
     // and display_font_ascender() while this font is active.
+    int level = s.fontSizeLevel;
+    if (level < 0) level = 0;
+    if (level >= FONT_SIZE_LEVEL_COUNT) level = FONT_SIZE_LEVEL_COUNT - 1;
     display_set_font(level, s.fontFamily);
-    debug_trace_mark("ui_reader_draw:after_set_font", String(level));
 
-    // Page text — body top must be below header divider + font ascender.
-    // Use the active reader font metrics here, not the fixed UI font height,
-    // or pagination and on-screen drawing drift apart and body text can spill
-    // into the footer/progress bar.
     const auto& lines = reader.getPageLines();
     debug_trace_mark("ui_reader_draw:got_lines", String(lines.size()));
-    int bodyTop = HEADER_HEIGHT + MARGIN_Y;  // top edge of body area
+
+    int bodyTop = bodyY;                       // top edge of body area
     int fontAscender = display_font_ascender();
     int bodyFontH = display_font_height();
     int lineHeight = (bodyFontH * LINE_SPACING_PCT[spacingLevel] + 99) / 100;
     if (lineHeight < bodyFontH) lineHeight = bodyFontH;
     int lineSpacing = lineHeight - bodyFontH;
     int lineH = bodyFontH + lineSpacing;
-    int y = bodyTop + fontAscender;  // first baseline
-    int bodyBottom = H - FOOTER_HEIGHT - 2;  // minimal guard above the footer area
+    int y = bodyTop + fontAscender;            // first baseline
+    int bodyBottom = PORTRAIT_H - FOOTER_HEIGHT - 2;  // 908 — guard above footer
 
     if (lines.empty()) {
         display_draw_text(marginX, y, "[Page content unavailable]", 6);
@@ -154,9 +195,9 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
                 int imgW = 0, imgH = 0, imgLines = 1;
                 if (inline_image_parse_enriched(line, imgPath, imgW, imgH, imgLines)) {
                     imgLines = max(1, imgLines);
-                    int safeW = max(1, min(imgW, W - marginX * 2));
+                    int safeW = max(1, min(imgW, PORTRAIT_W - marginX * 2));
                     int safeH = max(1, min(imgH, bodyBottom - (y - fontAscender)));
-                    int imgX = marginX + (W - marginX * 2 - safeW) / 2;
+                    int imgX = marginX + (PORTRAIT_W - marginX * 2 - safeW) / 2;
                     int imgY = y - fontAscender;
                     debug_trace_mark("ui_reader_draw:inline_image_render", imgPath);
                     if (!inline_image_render(imgPath, imgX, imgY, imgW, imgH)) {
@@ -181,26 +222,36 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
             }
         }
     }
-    debug_trace_mark("ui_reader_draw:after_body");
+}
 
-    // Back to UI font for progress bar + page-number footer.
+// ─── Footer zone (0, 910, 540, 50) ─────────────────────────────────
+// Progress bar (4 px tall at y=910) and the page-number / chapter
+// / percentage line whose baseline sits at y=958. Inter M (size 2)
+// glyphs ascend ~40 px above the baseline → top ≈ y=918, all inside
+// the [910, 960) zone.
+static void ui_reader_draw_footer_zone(BookReader& reader, const Settings& s,
+                                       int marginX) {
+    const int footerY = PORTRAIT_H - FOOTER_HEIGHT;   // 910
+    display_draw_filled_rect(0, footerY, PORTRAIT_W, FOOTER_HEIGHT, 15);
+
+    // Footer chrome always in Inter.
     display_set_font_size(2);
 
-    // Progress bar
-    int barY = H - FOOTER_HEIGHT;
     int totalPages = reader.getTotalPages();
-    int curPage = reader.getCurrentPage();
+    int curPage    = reader.getCurrentPage();
+
+    // Progress bar at the very top of the footer zone.
+    int barY = footerY;
     float progress = (totalPages > 1) ? (float)curPage / (totalPages - 1) : 1.0f;
-    int barW = W - marginX * 2;
+    int barW = PORTRAIT_W - marginX * 2;
     int filledW = (int)(barW * progress);
 
     display_draw_filled_rect(marginX, barY, barW, PROGRESS_BAR_H, 12);
     if (filledW > 0)
         display_draw_filled_rect(marginX, barY, filledW, PROGRESS_BAR_H, 0);
 
-    // Footer text
     if (s.showPageNumbers) {
-        int footY = barY + PROGRESS_BAR_H + FONT_H - 6;
+        int footY = barY + PROGRESS_BAR_H + FONT_H - 6;  // 958
         char chInfo[32];
         snprintf(chInfo, sizeof(chInfo), "Ch %d/%d",
                  reader.getCurrentChapter() + 1, reader.getTotalChapters());
@@ -212,43 +263,144 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
         char pctStr[8];
         snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
         int pctW = display_text_width(pctStr);
-        display_draw_text((W - pctW) / 2, footY, pctStr, 0);
+        display_draw_text((PORTRAIT_W - pctW) / 2, footY, pctStr, 0);
 
         char pgInfo[32];
         snprintf(pgInfo, sizeof(pgInfo), "%d / %d", curPage + 1, totalPages);
         int pw = display_text_width(pgInfo);
-        display_draw_text(W - marginX - pw, footY, pgInfo, 0);
+        display_draw_text(PORTRAIT_W - marginX - pw, footY, pgInfo, 0);
     }
+}
+
+void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
+    debug_trace_mark("ui_reader_draw:start", String(reader.getCurrentChapter()) + ":" + String(reader.getCurrentPage()));
+    const Settings& s = settings_get();
+    debug_trace_mark("ui_reader_draw:got_settings");
+
+    int level = s.fontSizeLevel;
+    if (level < 0) level = 0;
+    if (level >= FONT_SIZE_LEVEL_COUNT) level = FONT_SIZE_LEVEL_COUNT - 1;
+    // Reader margins follow the per-size table, but UI chrome (header,
+    // footer, page numbers) renders in the UI font (Inter) regardless of
+    // the reader-family selection — see issue/Inter UI split.
+    int marginX = FONT_MARGIN_X_VALUES[level];
+    uint8_t spacingLevel = s.lineSpacingLevel;
+    if (spacingLevel >= LINE_SPACING_LEVEL_COUNT) spacingLevel = 2;
+
+    // ─── Decide which zones are dirty this frame ───────────────────
+    // Default: nothing is dirty. We then OR in dirtiness based on the
+    // refresh-flag state and on cached-state deltas.
+    bool headerDirty = false;
+    bool bodyDirty   = false;
+    bool footerDirty = false;
+    ChangeKind headerKind = ChangeKind::GlyphTick;
+    ChangeKind bodyKind   = ChangeKind::TextReflow;
+    ChangeKind footerKind = ChangeKind::TextReflow;
+
+    if (refresh.forceFullRefresh) {
+        // Wake from sleep or explicit user-requested clean refresh.
+        // Repaint everything with the WakeFull intent — display_flush()
+        // sees WakeFull on any zone and routes the whole frame through
+        // the full GC16 + 6-cycle clear path, which also resets the
+        // anti-ghost counter to zero. Cache invalidated below.
+        headerDirty = bodyDirty = footerDirty = true;
+        headerKind = bodyKind = footerKind = ChangeKind::WakeFull;
+        invalidate_zone_cache();
+    } else if (refresh.chapterJump) {
+        // Chapter boundary — body content changes substantially. Force
+        // StructuralRedraw on body+footer (page-number block changes).
+        // Header may also need an update if the bookmark flag flipped
+        // across the boundary; the delta check below handles that.
+        bodyDirty   = true; bodyKind   = ChangeKind::StructuralRedraw;
+        footerDirty = true; footerKind = ChangeKind::StructuralRedraw;
+    } else {
+        // Ordinary page turn (refresh.fastRefresh) OR explicit redraw
+        // with no refresh flags set (e.g. menu close → return to
+        // reader): body and footer always change; header only if the
+        // delta check below triggers.
+        bodyDirty   = true; bodyKind   = ChangeKind::TextReflow;
+        footerDirty = true; footerKind = ChangeKind::TextReflow;
+    }
+
+    // ─── Header delta detection ────────────────────────────────────
+    // The header is the dominant idle-case zone: when nothing visible
+    // in the header has changed we leave it un-dirty and the panel
+    // skips the partial update for that rect entirely. Deltas only
+    // fire when the cache is valid (i.e. the previous frame painted
+    // the header from known state); on the first frame after wake /
+    // anti-ghost full refresh the cache is invalid and the
+    // forceFullRefresh branch above already marked the header dirty.
+    int curBattery = s.showBattery ? battery_percent() : -1;
+    if (s_zoneCacheValid && curBattery != s_lastBatteryPct) {
+        headerDirty = true;
+        // headerKind defaults to GlyphTick (DU4 — cheapest, single
+        // glyph swap). The forceFullRefresh branch clears the cache,
+        // so when this branch runs headerKind is always GlyphTick and
+        // no downgrade can happen.
+    }
+    s_lastBatteryPct = curBattery;
+
+    // Bookmark marker "* " — appearance/disappearance is a structural
+    // change (a glyph appears that wasn't there before), so GL16 is
+    // the right waveform to avoid a faint ghost of the old state.
+    bool curBookmark = reader.isCurrentPageBookmarked();
+    if (s_zoneCacheValid && curBookmark != s_lastBookmark) {
+        headerDirty = true;
+        if (headerKind == ChangeKind::GlyphTick) {
+            headerKind = ChangeKind::StructuralRedraw;
+        }
+    }
+    s_lastBookmark = curBookmark;
+
+    // First draw after invalidate (s_zoneCacheValid == false): the
+    // refresh-flag branch above already covers full repaint via
+    // forceFullRefresh. Once we've completed this frame, the cache is
+    // valid for delta-only detection on subsequent frames.
+    s_zoneCacheValid = true;
+
+    // ─── Paint the dirty zones into the framebuffer ────────────────
+    // Each helper only writes inside its own rect; non-dirty zones
+    // keep their previous framebuffer content (and the EPD likewise
+    // keeps the corresponding visible pixels since display_flush()
+    // only pushes dirty rects).
+    display_begin_frame();
+
+    if (headerDirty) ui_reader_draw_header_zone(reader, s, marginX);
+    debug_trace_mark("ui_reader_draw:after_header");
+
+    if (bodyDirty)   ui_reader_draw_body_zone(reader, s, marginX, spacingLevel);
+    debug_trace_mark("ui_reader_draw:after_body");
+
+    if (footerDirty) ui_reader_draw_footer_zone(reader, s, marginX);
     debug_trace_mark("ui_reader_draw:after_footer");
 
-    // Reader uses a CrossPoint-style hybrid: fast localized cleanup for the
-    // reading body on ordinary page turns, with periodic stronger body-only
-    // cleanup to keep ghosting from accumulating.
+    // ─── Mark the dirty zones and push ─────────────────────────────
+    if (headerDirty) display_mark_dirty(Zone::ReaderHeader, headerKind);
+    if (bodyDirty)   display_mark_dirty(Zone::ReaderBody,   bodyKind);
+    if (footerDirty) display_mark_dirty(Zone::ReaderFooter, footerKind);
+
     debug_trace_mark("ui_reader_draw:before_refresh");
     if (refresh.forceFullRefresh) {
-        // Full refresh to cleanly replace sleep image on wake resume
-        display_update();
+        // Explicit full path — also resets _framesSinceFullRefresh in
+        // display.cpp so the anti-ghost counter restarts cleanly.
+        display_force_full_refresh();
         refresh.forceFullRefresh = false;
         refresh.pageTurnsSinceFull = 0;
-    } else if (refresh.fastRefresh) {
-        int refreshInterval = settings_get().refreshEveryPages;
-        if (refreshInterval < 1) refreshInterval = 4;
-        bool strongCleanup = (refresh.pageTurnsSinceFull + 1 >= refreshInterval);
-
-        if (strongCleanup) {
-            display_update_medium();
-            refresh.pageTurnsSinceFull = 0;
-        } else {
-            display_update_partial();
-            refresh.pageTurnsSinceFull++;
-        }
-    } else if (refresh.chapterJump) {
-        display_update_fast();
-        refresh.pageTurnsSinceFull = 0;
-        refresh.chapterJump = false;
     } else {
-        display_update_fast();
-        refresh.pageTurnsSinceFull = 0;
+        // Anti-ghost cadence is governed by the user setting
+        // (settings.refreshEveryPages → forceFullRefresh in main.cpp);
+        // the display layer's REFRESH_INTERVAL_READER is a backstop
+        // that will auto-upgrade this flush to AntiGhost if the counter
+        // would exceed the threshold.
+        display_flush();
+        if (refresh.chapterJump) {
+            refresh.pageTurnsSinceFull = 0;
+            refresh.chapterJump = false;
+        } else if (refresh.fastRefresh) {
+            refresh.pageTurnsSinceFull++;
+        } else {
+            refresh.pageTurnsSinceFull = 0;
+        }
     }
     setNeedsRedraw(false);
     debug_trace_mark("ui_reader_draw:done");
