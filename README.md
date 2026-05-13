@@ -43,13 +43,17 @@ You have two options.
 
 The fastest way. Works on Windows, macOS, Linux, and ChromeOS — no drivers, no PlatformIO, no command line.
 
-1. Open **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** in **Google Chrome**, **Microsoft Edge**, or **Opera** on a desktop computer. The hub page lists two tools — pick **"Install firmware"**.
+1. Open the Paperloom Workshop hub:
+   **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)**
+   in **Google Chrome**, **Microsoft Edge**, or **Opera** on a desktop computer.
    _(Firefox and Safari are not supported — they don't implement Web Serial.)_
-2. Plug the e-reader into your computer with a **USB-C cable** that supports data (not just charging).
-3. On the device, hold the **BOOT** button while pressing **RST** once, then release BOOT. This forces download mode.
-4. On the web page, click **Connect** → pick the serial port that appears (usually labeled `USB JTAG/serial debug unit` or similar).
-5. Click **Install Paperloom** → wait ~30–60 seconds for the flash to complete.
-6. When it's done, press **RST** once. The device boots into Paperloom.
+2. Pick the **"Install firmware"** card. (The installer lives at
+   [`lazybone.github.io/Paperloom/flasher/`](https://lazybone.github.io/Paperloom/flasher/) — you can also link to that page directly.)
+3. Plug the e-reader into your computer with a **USB-C cable** that supports data (not just charging).
+4. On the device, hold the **BOOT** button while pressing **RST** once, then release BOOT. This forces download mode.
+5. On the web page, click **Install Paperloom** → pick the serial port that appears (usually labeled `USB JTAG/serial debug unit` or similar).
+6. Wait ~30–60 seconds for the flash to complete.
+7. When it's done, press **RST** once. The device boots into Paperloom.
 
 If no port shows up, try a different USB-C cable — many cables are power-only and silently won't enumerate as a serial device.
 
@@ -75,7 +79,39 @@ pio run -t upload
 
 ### Optional: pre-optimize books before uploading
 
-The same hub at **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** has a second tool: **EPUB optimizer**. Drop one or more EPUBs in your browser; it quantises images to the 16-gray palette the e-paper display can actually show, strips embedded fonts and unused CSS, repairs the table of contents, and hands back a smaller, sharper EPUB. Everything runs in the browser tab — books never leave your machine. Then drag the optimised file onto the WiFi uploader in step 4. See [`site/optimizer/README.md`](site/optimizer/README.md) for the full pipeline.
+The Workshop hub also has a second tool: the **EPUB optimizer** at
+**[lazybone.github.io/Paperloom/optimizer/](https://lazybone.github.io/Paperloom/optimizer/)**.
+
+Drop one or more EPUBs in your browser; the tool reads each file, shows
+you its cover, title, and author (which you can edit), then runs a
+10-stage pipeline:
+
+- detects and rejects DRM-protected files
+- quantises images to the 16-gray palette the e-paper display can show
+- strips embedded fonts and unused CSS
+- normalises text (whitespace, OCR ligatures, smart quotes, NFC)
+- repairs or generates a Table of Contents
+- re-packages the EPUB at a lower size with sharper text
+
+Everything runs in the browser tab — your books never leave your
+machine, there is no upload, no analytics, no server. Drop the
+optimised file onto the WiFi uploader (step 4 above) and you're done.
+
+See [`site/optimizer/README.md`](site/optimizer/README.md) for the
+full pipeline + browser-support matrix.
+
+### The Paperloom Workshop
+
+To recap, the project ships three browser-accessible tools, all served
+from GitHub Pages under one hub:
+
+| URL | Tool | What it does |
+|-----|------|--------------|
+| [`/`](https://lazybone.github.io/Paperloom/) | Hub | Editorial landing page with the two cards below |
+| [`/flasher/`](https://lazybone.github.io/Paperloom/flasher/) | Firmware installer | Flashes the latest Paperloom build over USB-C (Chrome / Edge / Opera) |
+| [`/optimizer/`](https://lazybone.github.io/Paperloom/optimizer/) | EPUB optimizer | Trims EPUBs for the 16-gray Paperloom display — entirely in the browser |
+
+Both tools self-host every asset (fonts, esp-web-tools); nothing third-party is fetched at use time.
 
 ---
 
