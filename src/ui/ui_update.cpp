@@ -41,8 +41,16 @@ void ui_ota_draw(OtaState& otaState) {
         }
 
         case OTA_RESULT: {
+            char msg[64];
+            // ota_check_for_update populates latestVersion only on a
+            // successful API response. An empty string means the fetch
+            // itself failed (WiFi, TLS, HTTP error, parse error) — don't
+            // claim "up to date" in that case, the device may simply not
+            // have seen the latest release yet.
+            const bool fetchOk = otaState.latestVersion.length() > 0
+                && (otaState.latestVersion[0] == 'v' || otaState.latestVersion[0] == 'V'
+                    || (otaState.latestVersion[0] >= '0' && otaState.latestVersion[0] <= '9'));
             if (otaState.updateAvailable) {
-                char msg[64];
                 snprintf(msg, sizeof(msg), "%s available", otaState.latestVersion.c_str());
                 int mw = display_text_width(msg);
                 display_draw_text((W - mw) / 2, cy, msg, 0);
@@ -50,14 +58,20 @@ void ui_ota_draw(OtaState& otaState) {
                 const char* tap = "Tap to install";
                 int tw = display_text_width(tap);
                 display_draw_text((W - tw) / 2, cy + FONT_H + 16, tap, 3);
-                drawBottomBar("[ Back ]");
-            } else {
-                char msg[64];
+            } else if (fetchOk) {
                 snprintf(msg, sizeof(msg), "Up to date (v%s)", FIRMWARE_VERSION);
                 int mw = display_text_width(msg);
                 display_draw_text((W - mw) / 2, cy, msg, 0);
-                drawBottomBar("[ Back ]");
+            } else {
+                const char* msg1 = "Update check failed";
+                int mw = display_text_width(msg1);
+                display_draw_text((W - mw) / 2, cy, msg1, 0);
+                char detail[80];
+                snprintf(detail, sizeof(detail), "Running v%s — try again", FIRMWARE_VERSION);
+                int dw = display_text_width(detail);
+                display_draw_text((W - dw) / 2, cy + FONT_H + 16, detail, 3);
             }
+            drawBottomBar("[ Back ]");
             display_update_fast();
             break;
         }
