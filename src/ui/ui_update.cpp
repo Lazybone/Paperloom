@@ -8,6 +8,7 @@
 #include "ota_update.h"
 #include <WiFi.h>
 #include <qrcode.h>
+#include <esp_task_wdt.h>
 #include <functional>
 #include <cstring>
 
@@ -191,41 +192,69 @@ AppState ui_ota_touch(int x, int y, OtaState& otaState) {
         // Draw the initial download screen
         ui_ota_draw(otaState);
 
-        // Perform the download (blocking with progress callbacks)
-        bool ok = ota_install_update([&otaState](int pct) {
+        // Perform the download (blocking with progress callbacks).
+        //
+        // Rate-limit the UI updates: each flush is a FullScreen
+        // StructuralRedraw, and display.cpp's anti-ghost counter
+        // auto-promotes every REFRESH_INTERVAL_READER (=6) flushes to a
+        // clean GC16 (~1 s blocking flash). At the old "every 5 %" cadence
+        // that meant ~3 anti-ghost flashes per download — visible mid-
+        // download regression. Capping UI refresh to once per 2 s reduces
+        // the flush count by ~5×, so the anti-ghost flash becomes a once-
+        // per-download event at most. Accurate progress + anti-ghost are
+        // fundamentally in tension; this is the pragmatic middle ground.
+        unsigned long lastOtaUiUpdateMs = 0;
+        bool ok = ota_install_update([&otaState, &lastOtaUiUpdateMs](int pct) {
             otaState.progress = pct;
-            if (pct % 5 == 0) {
-                display_fill_screen(15);
-                drawHeader("Firmware Update");
+            const unsigned long now = millis();
+            // Always render the final 100 % tick so the user sees the
+            // download complete; otherwise honour the 2 s rate limit.
+            const bool isFinalTick = (pct >= 100);
+            if (!isFinalTick && (now - lastOtaUiUpdateMs) < 2000) {
+                return;
+            }
+            lastOtaUiUpdateMs = now;
 
-                int cy = H / 2 - 40;
-                const char* msg = "Downloading update...";
-                int mw = display_text_width(msg);
-                display_draw_text((W - mw) / 2, cy - 20, msg, 0);
+            display_fill_screen(15);
+            drawHeader("Firmware Update");
 
-                int barX = MARGIN_X + 20;
-                int barW = W - barX * 2;
-                int barY = cy + 30;
-                int barH = 16;
-                display_draw_rect(barX, barY, barW, barH, 0);
-                int fillW = (barW - 4) * pct / 100;
-                if (fillW > 0) {
-                    display_draw_filled_rect(barX + 2, barY + 2, fillW, barH - 4, 0);
-                }
+            int cy = H / 2 - 40;
+            const char* msg = "Downloading update...";
+            int mw = display_text_width(msg);
+            display_draw_text((W - mw) / 2, cy - 20, msg, 0);
 
-                char pctStr[16];
-                snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
-                int pw = display_text_width(pctStr);
-                display_draw_text((W - pw) / 2, barY + barH + 20, pctStr, 0);
+            int barX = MARGIN_X + 20;
+            int barW = W - barX * 2;
+            int barY = cy + 30;
+            int barH = 16;
+            display_draw_rect(barX, barY, barW, barH, 0);
+            int fillW = (barW - 4) * pct / 100;
+            if (fillW > 0) {
+                display_draw_filled_rect(barX + 2, barY + 2, fillW, barH - 4, 0);
+            }
 
-                // Progress callback redraws the entire screen (fill +
-                // header + bar + percentage), not just the progress bar
-                // region — so this is a StructuralRedraw, not a small
-                // GlyphTick. The anti-ghost counter will auto-promote to
-                // a clean GC16 every REFRESH_INTERVAL_READER ticks.
-                display_begin_frame();
-                display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
-                display_flush();
+            char pctStr[16];
+            snprintf(pctStr, sizeof(pctStr), "%d%%", pct);
+            int pw = display_text_width(pctStr);
+            display_draw_text((W - pw) / 2, barY + barH + 20, pctStr, 0);
+
+            // Progress callback redraws the entire screen (fill +
+            // header + bar + percentage), not just the progress bar
+            // region — so this is a StructuralRedraw, not a small
+            // GlyphTick. The anti-ghost counter will auto-promote to
+            // a clean GC16 every REFRESH_INTERVAL_READER ticks; rate
+            // limiting above keeps that to ~once per download.
+            display_begin_frame();
+            display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+            display_flush();
+
+            // Defensive WDT feed: a flush that hits the anti-ghost
+            // promotion can block ~1 s, and the surrounding HTTP
+            // download loop has its own watchdog expectations.
+            // Guard the reset so we don't trip ESP_ERR_NOT_FOUND on
+            // tasks that aren't subscribed to the TWDT.
+            if (esp_task_wdt_status(NULL) == ESP_OK) {
+                esp_task_wdt_reset();
             }
         });
 
