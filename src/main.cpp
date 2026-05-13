@@ -167,40 +167,47 @@ static const char* display_version_text() {
 }
 
 void drawHeader(const char* title, bool showBattery = true) {
-    display_draw_filled_rect(0, 0, W, HEADER_HEIGHT, 2);
-    display_draw_text(MARGIN_X, HEADER_HEIGHT - 18, title, 15);
+    // White background + black text + bottom rule. Pre-refactor this was
+    // inverted (dark-gray fill + white text), but GL16 partial updates
+    // don't fully settle gray transitions — tab switches left a visible
+    // ghost of the previous header text. White surfaces transition cleanly
+    // under partial waveforms so StructuralRedraw becomes safe.
+    display_draw_filled_rect(0, 0, W, HEADER_HEIGHT, 15);
+    display_draw_text(MARGIN_X, HEADER_HEIGHT - 18, title, 0);
 
     if (showBattery && settings_get().showBattery) {
         char battStr[16];
         snprintf(battStr, sizeof(battStr), "%d%%", battery_percent());
         int bw = display_text_width(battStr);
-        display_draw_text(W - MARGIN_X - bw, HEADER_HEIGHT - 18, battStr, 15);
+        display_draw_text(W - MARGIN_X - bw, HEADER_HEIGHT - 18, battStr, 0);
     }
 
-    display_draw_hline(0, HEADER_HEIGHT, W, 0);
+    display_draw_hline(0, HEADER_HEIGHT - 1, W, 0);
 }
 
 void drawBottomBar(const char* label) {
+    // White background + black text + top rule. Same rationale as
+    // drawHeader — partial waveforms need white surfaces to settle.
     int barY = H - FOOTER_HEIGHT;
-    display_draw_filled_rect(0, barY, W, FOOTER_HEIGHT, 2);
+    display_draw_filled_rect(0, barY, W, FOOTER_HEIGHT, 15);
     display_draw_hline(0, barY, W, 0);
     int tw = display_text_width(label);
-    display_draw_text((W - tw) / 2, barY + FOOTER_HEIGHT - 12, label, 15);
+    display_draw_text((W - tw) / 2, barY + FOOTER_HEIGHT - 12, label, 0);
 }
 
 // Split bottom bar: two buttons
 static void drawBottomBarSplit(const char* left, const char* right) {
     int barY = H - FOOTER_HEIGHT;
-    display_draw_filled_rect(0, barY, W, FOOTER_HEIGHT, 2);
+    display_draw_filled_rect(0, barY, W, FOOTER_HEIGHT, 15);
     display_draw_hline(0, barY, W, 0);
     // Vertical divider
-    display_draw_filled_rect(W / 2 - 1, barY + 4, 2, FOOTER_HEIGHT - 8, 10);
+    display_draw_filled_rect(W / 2 - 1, barY + 4, 2, FOOTER_HEIGHT - 8, 0);
     // Left label
     int lw = display_text_width(left);
-    display_draw_text(W / 4 - lw / 2, barY + FOOTER_HEIGHT - 12, left, 15);
+    display_draw_text(W / 4 - lw / 2, barY + FOOTER_HEIGHT - 12, left, 0);
     // Right label
     int rw = display_text_width(right);
-    display_draw_text(W * 3 / 4 - rw / 2, barY + FOOTER_HEIGHT - 12, right, 15);
+    display_draw_text(W * 3 / 4 - rw / 2, barY + FOOTER_HEIGHT - 12, right, 0);
 }
 
 static void drawSplashScreen(const char* statusMsg = "Starting up...") {

@@ -268,10 +268,11 @@ void ui_settings_draw(bool& settingsFromLibrary) {
 
         drawBottomBar("[ Cancel ]");
         // Picker overlay shares the full-screen redraw policy of the rest
-        // of the settings surface. See main draw flush below for why
-        // WakeFull (GC16 full) is required instead of StructuralRedraw.
+        // of the settings surface — StructuralRedraw (GL16 partial) is
+        // safe now that drawHeader/drawBottomBar fill white instead of
+        // dark gray.
         display_begin_frame();
-        display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
+        display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
         display_flush();
         settingsFromLibrary = false;
         return;
@@ -445,16 +446,17 @@ void ui_settings_draw(bool& settingsFromLibrary) {
     // partials are out of scope here — the screen is treated as one big
     // surface.
     //
-    // ChangeKind::WakeFull (GC16 full + 6-cycle clear) is required, NOT
-    // StructuralRedraw. Hardware verification (Phase 7) showed GL16
-    // partial leaves visible ghosting on header text ("Settings: Reading"
-    // bleeds through to "Settings: Library" on tab switch) and washes
-    // out the footer bar. Most pixels in settings are unchanged
-    // whitespace and the EPD waveform doesn't fully settle them under
-    // GL16 — exactly the failure mode predicted by the pre-refactor
-    // Phase-7 risk note. GC16 full clear settles every pixel cleanly.
+    // StructuralRedraw (GL16 non-flashing partial). First hardware test
+    // showed ghosting under GL16 because drawHeader / drawBottomBar were
+    // filling the header/footer bands with dark gray (value 2) — the
+    // gray-to-gray transitions don't settle under partial waveforms and
+    // left visible text shadow on tab switch. drawHeader/drawBottomBar
+    // were converted to white-fill + black-text + single rule line,
+    // which transitions cleanly under GL16. The anti-ghost counter
+    // (REFRESH_INTERVAL_READER, applied to all screens) enforces a
+    // periodic clean GC16 refresh.
     display_begin_frame();
-    display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
     display_flush();
     settingsFromLibrary = false;
 }
