@@ -142,7 +142,12 @@ static const int BOOK_ITEM_H = FONT_H * 2 + 12;  // title + info + padding
 
     // Update only the banner so the sleep image remains visible elsewhere,
     // giving immediate confirmation that the wake button press was accepted.
-    display_update_reader_body(0, y, W, bannerH, false);
+    // NOTE: function is currently [[maybe_unused]] — kept for potential future
+    // restore behind an explicit force-full-refresh preamble.
+    display_set_overlay_rect(0, y, W, bannerH);
+    display_begin_frame();
+    display_mark_dirty(Zone::Overlay, ChangeKind::StructuralRedraw);
+    display_flush();
 }
 
 static void enterDeepSleep(bool triggeredByButton = false);
@@ -817,7 +822,7 @@ void setup() {
         // Cold boot: show splash screen.
         display_clear();
         drawSplashScreen();
-        display_update();
+        display_force_full_refresh();
     }
     // Wake path: do NOT call display_clear() — the sleep image is still
     // latched on the panel.  The first drawXxxScreen() call will overwrite
@@ -845,7 +850,7 @@ void setup() {
         const char* hint = "Insert SD card and restart";
         int hw = display_text_width(hint);
         display_draw_text((W - hw) / 2, H / 2 + 40, hint, 6);
-        display_update();
+        display_force_full_refresh();
         // Halt here. Continuing into settings_init / library_scan against an
         // unmounted SD silently produces a fake-but-empty library and burns
         // through the boot path with no working storage. Wait for a power
@@ -1002,7 +1007,9 @@ void setup() {
                 const char* msg = "Previous session crashed — book position reset.";
                 int mw = display_text_width(msg);
                 display_draw_text((W - mw) / 2, by + bh / 2 + 8, msg, 15);
-                display_update_fast();
+                display_begin_frame();
+                display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+                display_flush();
                 // Clear ONLY after the banner is on the panel.
                 Preferences crPrefs;
                 crPrefs.begin("ereader", false);
