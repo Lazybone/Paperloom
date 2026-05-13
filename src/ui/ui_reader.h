@@ -13,7 +13,12 @@ struct ReaderRefreshState {
     bool fastRefresh;
     bool chapterJump;
     bool forceFullRefresh;
-    int  pageTurnsSinceFull;
+    // DEPRECATED post partial-update refactor: anti-ghost cadence is now
+    // owned by display.cpp's _framesSinceFullRefresh counter (auto-upgrades
+    // to GC16 every REFRESH_INTERVAL_READER frames). This field is still
+    // incremented by main.cpp but no longer drives any waveform decision.
+    // Remove in a follow-up cleanup once main.cpp is migrated.
+    unsigned int pageTurnsSinceFull;
 };
 
 // ─── Reader Screen ──────────────────────────────────────────────────

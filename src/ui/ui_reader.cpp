@@ -358,7 +358,6 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
         // so when this branch runs headerKind is always GlyphTick and
         // no downgrade can happen.
     }
-    s_lastBatteryPct = curBattery;
 
     // Bookmark marker "* " — appearance/disappearance is a structural
     // change (a glyph appears that wasn't there before), so GL16 is
@@ -370,13 +369,23 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
             headerKind = ChangeKind::StructuralRedraw;
         }
     }
-    s_lastBookmark = curBookmark;
 
-    // First draw after invalidate (s_zoneCacheValid == false): the
-    // refresh-flag branch above already covers full repaint via
-    // forceFullRefresh. Once we've completed this frame, the cache is
-    // valid for delta-only detection on subsequent frames.
-    s_zoneCacheValid = true;
+    // Cache invariant: s_lastBatteryPct / s_lastBookmark are only
+    // authoritative when the header was actually painted with those
+    // values. If headerDirty is false this frame (no delta, cache
+    // already matched) the cache stays valid with its existing values.
+    // If headerDirty is true, we commit the new values and mark the
+    // cache valid — they will be painted below.
+    //
+    // Without this gating, a hypothetical path that set headerDirty
+    // false while writing through s_lastBatteryPct = curBattery would
+    // claim authoritative cache state without the panel actually
+    // showing it. The gating makes the invariant explicit.
+    if (headerDirty) {
+        s_lastBatteryPct = curBattery;
+        s_lastBookmark   = curBookmark;
+        s_zoneCacheValid = true;
+    }
 
     // ─── Paint the dirty zones into the framebuffer ────────────────
     // Each helper only writes inside its own rect; non-dirty zones
@@ -412,6 +421,13 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
         display_flush();
         refresh.forceFullRefresh = false;
         refresh.pageTurnsSinceFull = 0;
+        // Also consume chapterJump: forceFullRefresh subsumes a chapter
+        // boundary (the whole frame is going through WakeFull/GC16
+        // already). Without this, a frame that arrived with both flags
+        // set would leak chapterJump into the next ordinary page turn,
+        // routing it through the StructuralRedraw path instead of
+        // TextReflow and resetting pageTurnsSinceFull again.
+        refresh.chapterJump = false;
     } else {
         // Anti-ghost cadence is governed by the user setting
         // (settings.refreshEveryPages → forceFullRefresh in main.cpp);
