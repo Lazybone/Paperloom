@@ -172,7 +172,9 @@ void ui_keyboard_draw() {
     fx += FN_CANCEL_W;
     draw_key_box(fx, FUNC_ROW_Y, FN_DONE_W, FUNC_ROW_H, "Done", false);
 
-    display_update_fast();
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
 }
 
 // Handle a key character coming from the layout.

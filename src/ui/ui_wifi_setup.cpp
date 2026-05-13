@@ -260,7 +260,9 @@ void ui_wifi_setup_draw() {
     display_draw_filled_rect(fx - 1, FOOTER_TOP + 4, 2, FOOTER_HEIGHT - 8, 10);
     drawSeg(fx, FN_PAGE_W, "Next >", !canScrollDn);
 
-    display_update_fast();
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
 }
 
 // ─── Touch handling ────────────────────────────────────────────────

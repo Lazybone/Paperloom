@@ -267,7 +267,14 @@ void ui_settings_draw(bool& settingsFromLibrary) {
         }
 
         drawBottomBar("[ Cancel ]");
-        display_update_medium();
+        // Picker overlay shares the full-screen redraw policy of the rest
+        // of the settings surface. Route through the intent API so the
+        // display layer's anti-ghost counter and zone tracking stay
+        // consistent — see the comment above the main draw flush below
+        // for the GL16-vs-GC16 trade-off.
+        display_begin_frame();
+        display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+        display_flush();
         settingsFromLibrary = false;
         return;
     }
@@ -435,11 +442,26 @@ void ui_settings_draw(bool& settingsFromLibrary) {
     }
 
     drawBottomBar("[ Back ]");
-    // Settings always uses a full medium refresh.  Partial / region updates
-    // produced vertical stripe ghosts on this panel because most pixels on
-    // the screen are unchanged whitespace and the EPD waveform doesn't fully
-    // settle them.  The brief flash on every tap is the lesser evil.
-    display_update_medium();
+    // Settings is a FullScreen zone in the intent API. The hardware spike
+    // (Phase -1 of the partial-update refactor) was skipped, so per-row
+    // partials are out of scope here — the screen is treated as one big
+    // surface.
+    //
+    // Previously this routed through display_update_medium() which the
+    // legacy shim mapped to ChangeKind::WakeFull (GC16 full + 6-cycle
+    // clear). We now request StructuralRedraw (GL16 non-flashing partial)
+    // so the screen behaves like every other non-reader surface and the
+    // anti-ghost counter is what enforces a periodic clean refresh, not
+    // every single redraw.
+    //
+    // Historical note: partial / region updates produced vertical stripe
+    // ghosts on this panel because most pixels are unchanged whitespace
+    // and the EPD waveform doesn't fully settle them. If those stripes
+    // recur with GL16 in Phase 7 hardware testing, escalate this back to
+    // ChangeKind::WakeFull (matches the old GC16 full-refresh behavior).
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     settingsFromLibrary = false;
 }
 

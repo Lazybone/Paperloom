@@ -36,7 +36,9 @@ void ui_ota_draw(OtaState& otaState) {
             int mw = display_text_width(msg);
             display_draw_text((W - mw) / 2, cy, msg, 0);
             drawBottomBar("[ Cancel ]");
-            display_update_fast();
+            display_begin_frame();
+            display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+            display_flush();
             break;
         }
 
@@ -72,7 +74,9 @@ void ui_ota_draw(OtaState& otaState) {
                 display_draw_text((W - dw) / 2, cy + FONT_H + 16, detail, 3);
             }
             drawBottomBar("[ Back ]");
-            display_update_fast();
+            display_begin_frame();
+            display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+            display_flush();
             break;
         }
 
@@ -96,7 +100,9 @@ void ui_ota_draw(OtaState& otaState) {
             int pw = display_text_width(pctStr);
             display_draw_text((W - pw) / 2, barY + barH + 20, pctStr, 0);
 
-            display_update_fast();
+            display_begin_frame();
+            display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+            display_flush();
             break;
         }
 
@@ -109,7 +115,11 @@ void ui_ota_draw(OtaState& otaState) {
             int m2w = display_text_width(msg2);
             display_draw_text((W - m2w) / 2, cy + FONT_H + 16, msg2, 3);
 
-            display_update();
+            // Final screen before reboot — request an explicit clean GC16
+            // refresh so the "Update complete!" message is rendered without
+            // any partial-update artifacts. Also resets the anti-ghost
+            // counter, which is harmless given the imminent restart.
+            display_force_full_refresh();
 
             delay(2000);
             esp_restart();
@@ -127,7 +137,9 @@ void ui_ota_draw(OtaState& otaState) {
             }
 
             drawBottomBar("[ Back ]");
-            display_update_fast();
+            display_begin_frame();
+            display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+            display_flush();
             break;
         }
 
@@ -206,7 +218,14 @@ AppState ui_ota_touch(int x, int y, OtaState& otaState) {
                 int pw = display_text_width(pctStr);
                 display_draw_text((W - pw) / 2, barY + barH + 20, pctStr, 0);
 
-                display_update_fast();
+                // Progress callback redraws the entire screen (fill +
+                // header + bar + percentage), not just the progress bar
+                // region — so this is a StructuralRedraw, not a small
+                // GlyphTick. The anti-ghost counter will auto-promote to
+                // a clean GC16 every REFRESH_INTERVAL_READER ticks.
+                display_begin_frame();
+                display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+                display_flush();
             }
         });
 
@@ -336,7 +355,9 @@ void ui_wifi_draw() {
     // Standard dark footer bar (matches every other full-screen view in the app).
     drawBottomBar("[ Back ]");
 
-    display_update_fast();
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
 }
 
 AppState ui_wifi_touch(int x, int y,
