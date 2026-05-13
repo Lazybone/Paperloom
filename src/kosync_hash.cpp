@@ -77,12 +77,8 @@ String kosync_compute_document_hash(const String& epubFilePath) {
     Md5Guard md5;
     // ESP-IDF 5.x (espressif32 6.4.0) ships the modern non-_ret mbedtls API.
     // The older *_ret variants were removed when the deprecated wrappers were
-    // dropped; do NOT reintroduce them.
-    if (mbedtls_md5_starts(md5.get()) != 0) {
-        Serial.println("[kosync_hash] md5 starts failed");
-        f.close();
-        return String();
-    }
+    // dropped; the modern variants return void — no status to check.
+    mbedtls_md5_starts(md5.get());
 
     uint8_t buf[kChunkSize];
     bool readError = false;
@@ -115,11 +111,7 @@ String kosync_compute_document_hash(const String& epubFilePath) {
             break;
         }
 
-        if (mbedtls_md5_update(md5.get(), buf, static_cast<size_t>(got)) != 0) {
-            Serial.println("[kosync_hash] md5 update failed");
-            readError = true;
-            break;
-        }
+        mbedtls_md5_update(md5.get(), buf, static_cast<size_t>(got));
     }
 
     f.close();
@@ -129,10 +121,7 @@ String kosync_compute_document_hash(const String& epubFilePath) {
     }
 
     uint8_t digest[16];
-    if (mbedtls_md5_finish(md5.get(), digest) != 0) {
-        Serial.println("[kosync_hash] md5 finish failed");
-        return String();
-    }
+    mbedtls_md5_finish(md5.get(), digest);
 
     return digest_to_hex(digest);
 }
