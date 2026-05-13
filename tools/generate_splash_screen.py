@@ -21,6 +21,12 @@ BMP_PATH = SCRIPT_DIR / "splash_screen.bmp"
 PREVIEW_PATH = SCRIPT_DIR / "splash_screen_preview.png"
 HEADER_PATH = REPO_ROOT / "include" / "splash_screen.h"
 
+# 1-bit conversion threshold (0..255). Pixels with luminance >= threshold
+# become white, below become black. Higher = more white. Tune via env var
+# SPLASH_THRESHOLD to suppress anti-alias halo / JPEG noise that would
+# otherwise show as scattered black dots on the EPD panel.
+THRESHOLD = int(os.environ.get("SPLASH_THRESHOLD", "128"))
+
 
 def load_source_image() -> Image.Image:
     if not SOURCE_IMAGE.exists():
@@ -35,7 +41,13 @@ def load_source_image() -> Image.Image:
 def main() -> None:
     img_rgb = load_source_image()
     img_rgb = img_rgb.crop((0, 0, W, ART_HEIGHT))
-    img_1bit = img_rgb.convert("1")
+    # Explicit threshold-based 1-bit conversion (no Floyd-Steinberg
+    # dithering). PIL's default img_rgb.convert("1") applies dithering
+    # which spreads anti-alias edges of the source artwork as scattered
+    # black pixels in supposedly-white regions — visible on the EPD as
+    # a "noise pattern" left/right of the central artwork.
+    img_gray = img_rgb.convert("L")
+    img_1bit = img_gray.point(lambda p: 255 if p >= THRESHOLD else 0).convert("1", dither=Image.Dither.NONE)
 
     BMP_PATH.parent.mkdir(parents=True, exist_ok=True)
     HEADER_PATH.parent.mkdir(parents=True, exist_ok=True)
