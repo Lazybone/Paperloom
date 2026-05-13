@@ -610,6 +610,10 @@ void ui_reader_menu_draw(BookReader& reader) {
     display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
     y += MENU_ITEM_H;
 
+    display_draw_text(indent, y, "Sleep", 0);
+    display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
+    y += MENU_ITEM_H;
+
     // Hint at bottom
     const char* hint = "Tap outside to resume";
     int hw = display_text_width(hint);
@@ -633,9 +637,9 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
     int zoneTop = MENU_START_Y + 40 - FONT_H;
     int row = (y - zoneTop) / MENU_ITEM_H;
     // Row count = base entries (Go to, TOC, Bookmarks, Sync Fortschritt,
-    // KoSync Setup, Settings, Library = 7) + optional Back row when the
-    // reader has navigation history. Keep in sync with ui_reader_menu_draw.
-    int rowCount = reader.hasNavigationHistory() ? 8 : 7;
+    // KoSync Setup, Settings, Library, Sleep = 8) + optional Back row when
+    // the reader has navigation history. Keep in sync with ui_reader_menu_draw.
+    int rowCount = reader.hasNavigationHistory() ? 9 : 8;
 
     if (y >= zoneTop && y < zoneTop + MENU_ITEM_H * rowCount) {
         refresh.fastRefresh = false;
@@ -709,6 +713,16 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
                 reader.closeBook();
                 setNeedsRedraw(true);
                 return STATE_LIBRARY;
+            case 7: // Sleep — Trigger deep sleep
+                // Intentionally do NOT call reader.saveProgress() /
+                // reader.closeBook() here: enterDeepSleep() (invoked by
+                // the dispatcher in handleMenuTouch when it sees
+                // STATE_SLEEP_REQUEST) handles its own sleep persistence,
+                // and crucially keeps the open book so the next wake
+                // resumes the reader on the same page. Closing the book
+                // here would defeat resume-on-wake.
+                setNeedsRedraw(true);
+                return STATE_SLEEP_REQUEST;
         }
     }
 

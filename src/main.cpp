@@ -413,6 +413,12 @@ static void handleReaderTouch(int x, int y, bool isLongPress) {
 
 static void handleMenuTouch(int x, int y) {
     AppState newState = ui_reader_menu_touch(x, y, reader, readerRefresh);
+    if (newState == STATE_SLEEP_REQUEST) {
+        enterDeepSleep(true);
+        return;  // Defensive: enterDeepSleep does not return; if it ever did,
+                 // we must NOT assign STATE_SLEEP_REQUEST to appState
+                 // (it would be persisted as the resume state by Preferences).
+    }
     if (newState == STATE_TOC) tocScroll = 0;
     if (newState == STATE_BOOKMARKS) bmScroll = 0;
     appState = newState;
