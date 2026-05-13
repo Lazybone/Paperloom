@@ -13,5 +13,8 @@ enum AppState {
     STATE_SETTINGS,     // settings page
     STATE_OTA_CHECK,    // OTA update check / download
     STATE_WIFI_SETUP,   // WiFi network scan + selection
-    STATE_WIFI_KEYBOARD // On-screen keyboard for SSID/password entry
+    STATE_WIFI_KEYBOARD, // On-screen keyboard for SSID/password entry
+    STATE_KOSYNC_SETUP,        // on-device kosync credential entry
+    STATE_SYNC_CONFLICT,       // local-vs-remote conflict resolution dialog (WP-9)
+    STATE_KOSYNC_PIN_PROMPT    // PIN displayed on e-paper during web-UI credential write (WP-6c)
 };
