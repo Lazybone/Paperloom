@@ -16,10 +16,14 @@
     - media-src 'none' + form-action 'none' close the doors on user-content
       <audio>/<video> and accidental form posts.
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'none'; worker-src 'self'; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
+  <!--
+    style-src 'unsafe-inline' is required because the UI binding sets
+    element.style.width on the progress bar at runtime. Inline-style
+    attacks need a separate XSS foothold, which is independently
+    blocked by script-src 'self' + the HTML sanitizer on every EPUB
+    document we process. Acceptable trade-off for a DOM-driven app. -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data: blob:; connect-src 'none'; worker-src 'self'; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="../shared/fonts.css" />
   <link rel="stylesheet" href="../shared/design.css" />
 

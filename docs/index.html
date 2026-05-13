@@ -12,10 +12,8 @@
     Hub Content-Security-Policy: pure static surface, no JS, no inline styles.
     Page-local CSS lives in ./index.css alongside the shared design tokens.
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data:; base-uri 'self'; form-action 'none'; object-src 'none';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'self'; font-src 'self'; img-src 'self' data:; base-uri 'self'; form-action 'none'; object-src 'none';" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="shared/fonts.css" />
   <link rel="stylesheet" href="shared/design.css" />
   <link rel="stylesheet" href="index.css" />

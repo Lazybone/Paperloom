@@ -10,9 +10,8 @@
 
   <!--
     Content-Security-Policy notes:
-    - script-src includes unpkg.com because esp-web-install-button is loaded from
-      that CDN and pulls additional chunks (install-dialog, esptool-js worker
-      runtime) at flash time.
+    - esp-web-tools is self-hosted under ./vendor/esp-web-tools/. No third-party
+      script origins, so script-src is just 'self'.
     - connect-src includes the GitHub release hosts because manifest.json
       points at https://github.com/.../releases/latest/download/Paperloom-merged.bin,
       which redirects to objects.githubusercontent.com / github-releases.githubusercontent.com.
@@ -20,25 +19,20 @@
     - worker-src includes blob: because esp-web-tools spawns the flashing worker
       from a blob URL it constructs at runtime.
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://unpkg.com https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
 
-  <link rel="preconnect" href="https://fonts.googleapis.com" />
-  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
   <link rel="stylesheet" href="../shared/fonts.css" />
   <link rel="stylesheet" href="../shared/design.css" />
 
   <!--
-    esp-web-tools v10.2.1, pinned by exact version + SRI on the entry module.
-    The entry uses dynamic imports for child chunks, which cannot be hash-pinned
-    here; the chunks load over the same unpkg origin and are covered by
-    script-src/connect-src. To tighten further, vendor the dist/ directory and
-    serve from same origin — tracked as a v0.4 hardening task.
+    esp-web-tools v10.2.1, vendored under docs/flasher/vendor/esp-web-tools/.
+    Apache-2.0 license at LICENSES/esp-web-tools-LICENSE.txt. Source tarball
+    fetched once via `npm pack esp-web-tools@10.2.1`; refresh by replaying the
+    same command and re-copying dist/web/*.js into the vendor directory.
   -->
   <script
     type="module"
-    src="https://unpkg.com/esp-web-tools@10.2.1/dist/web/install-button.js?module"
-    integrity="sha384-2Ea4WL8tjFb0qQKUqBoX45KlPVoUgL+Z3zUqsD0MHmtJ3faDbfNyZulLg/LfYDUZ"
-    crossorigin="anonymous"
+    src="./vendor/esp-web-tools/install-button.js"
   ></script>
 
   <link rel="stylesheet" href="./index.css" />
