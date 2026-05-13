@@ -101,9 +101,68 @@ static_assert(sizeof(_ui_fonts) / sizeof(_ui_fonts[0]) == FONT_SIZE_LEVEL_COUNT,
 
 static const GFXfont* _font = &InterM;  // boot default — UI font at level 2
 
-// Full refresh counter — every N partial updates, do a full refresh
-static int _partialCount = 0;
-static const int PARTIAL_REFRESH_INTERVAL = 10;
+// ─── Intent-based partial-update state ────────────────────────────────
+// Zone dirty-tracking table — see Zone enum in display.h. Reader zones
+// tile the 540×960 portrait surface with at most a 16 px gap between
+// header and body (the body starts at y=82 because the original layout
+// reserved that strip for a separator / chrome spacer). Coordinates are
+// portrait-space; rotatePortraitRegion() maps to landscape at draw time.
+struct ZoneState {
+    int x;
+    int y;
+    int w;
+    int h;
+    bool dirty;
+    ChangeKind intent;
+};
+
+static ZoneState _zones[(int)Zone::_Count] = {
+    /* ReaderHeader */ {   0,   0, 540,  66, false, ChangeKind::GlyphTick        },
+    /* ReaderBody   */ {   0,  82, 540, 828, false, ChangeKind::TextReflow       },
+    /* ReaderFooter */ {   0, 910, 540,  50, false, ChangeKind::TextReflow       },
+    /* Overlay      */ {   0,   0,   0,   0, false, ChangeKind::StructuralRedraw },
+    /* FullScreen   */ {   0,   0, 540, 960, false, ChangeKind::StructuralRedraw },
+};
+
+// Layout sanity: zone table must agree with config.h chrome dimensions and
+// must tile the full 960 px portrait height (header + gap + body + footer).
+static_assert(HEADER_HEIGHT == 66,
+              "HEADER_HEIGHT changed — update Zone::ReaderHeader rect");
+static_assert(FOOTER_HEIGHT == 50,
+              "FOOTER_HEIGHT changed — update Zone::ReaderFooter rect");
+static_assert(66 + 16 + 828 + 50 == PORTRAIT_H,
+              "Reader zones (header + gap + body + footer) must tile portrait height");
+static_assert(PORTRAIT_W == 540,
+              "Zone rects assume PORTRAIT_W == 540");
+static_assert(PORTRAIT_H == 960,
+              "Zone rects assume PORTRAIT_H == 960");
+
+// Anti-ghost cadence: after this many consecutive partial frames, the next
+// flush is auto-upgraded to a full GC16 refresh (and the counter resets).
+// 6 matches the documented reader page-turn budget — beyond that the panel
+// starts to accumulate visible ghosting on dark text.
+static constexpr int REFRESH_INTERVAL_READER = 6;
+static int _framesSinceFullRefresh = 0;
+
+// Power batching: when the next backend variant grows a "hold rails warm"
+// mode, display_flush() will skip the epd_be_poweron() ramp if the
+// previous flush poweroff'd less than POWER_HOLD_WINDOW_MS ago. We record
+// _lastPoweroffMs already so the optimization is a one-line change later.
+[[maybe_unused]] static constexpr unsigned long POWER_HOLD_WINDOW_MS = 80;
+static unsigned long _lastPoweroffMs = 0;
+
+// epdiy EpdDrawMode integer values, hardcoded here because including
+// <epdiy.h> in display.cpp would collide with our extern-C EpdRect
+// typedef. Values match the enum in .pio/libdeps/default/epdiy/src/epdiy.h
+// and are stable across upstream releases (epdiy ≥ v2.0.0).
+//   MODE_DU   = 0x1   (mono direct-update)
+//   MODE_GC16 = 0x2   (16-grey, flashing)
+//   MODE_GL16 = 0x5   (16-grey, non-flashing)
+//   MODE_DU4  = 0x7   (4-grey direct-update)
+[[maybe_unused]] static constexpr int EPD_MODE_DU   = 0x1;
+static constexpr int EPD_MODE_GC16 = 0x2;
+static constexpr int EPD_MODE_GL16 = 0x5;
+static constexpr int EPD_MODE_DU4  = 0x7;
 
 // ─── Glyph Bitmap LRU Cache (PSRAM) ──────────────────────────────────────
 
@@ -306,8 +365,10 @@ void display_clear() {
     epd_be_poweron();
     epd_be_clear();
     epd_be_poweroff_all();
-
-    _partialCount = 0;
+    _lastPoweroffMs = millis();
+    // Panel is now physically white; reset anti-ghost counter so the
+    // next frame doesn't immediately escalate to a forced full refresh.
+    _framesSinceFullRefresh = 0;
 }
 
 void display_fill_screen(uint8_t gray4) {
@@ -438,70 +499,11 @@ static void rotatePortraitToLandscape() {
     }
 }
 
-static EpdRect portraitRectToLandscape(int x, int y, int w, int h) {
-    if (x < 0) { w += x; x = 0; }
-    if (y < 0) { h += y; y = 0; }
-    if (x + w > PORTRAIT_W) w = PORTRAIT_W - x;
-    if (y + h > PORTRAIT_H) h = PORTRAIT_H - y;
-    if (w < 0) w = 0;
-    if (h < 0) h = 0;
-
-    EpdRect area;
-    area.x = y;
-    area.y = PORTRAIT_W - (x + w);
-    area.width = h;
-    area.height = w;
-    return area;
-}
-
-static uint8_t* extractLandscapeArea(EpdRect area) {
-    if (!_lfb || area.width <= 0 || area.height <= 0) return nullptr;
-
-    int srcStride = PHYS_WIDTH / 2;
-    int dstStride = (area.width + 1) / 2;
-    size_t bytes = (size_t)dstStride * area.height;
-    uint8_t* out = (uint8_t*)malloc(bytes);
-    if (!out) return nullptr;
-    memset(out, 0xFF, bytes);
-
-    for (int row = 0; row < area.height; row++) {
-        const uint8_t* srcRow = _lfb + (area.y + row) * srcStride;
-        uint8_t* dstRow = out + row * dstStride;
-
-        for (int col = 0; col < area.width; col++) {
-            int srcX = area.x + col;
-            uint8_t srcByte = srcRow[srcX / 2];
-            uint8_t val = (srcX & 1) ? ((srcByte >> 4) & 0x0F) : (srcByte & 0x0F);
-
-            int dstByte = col / 2;
-            if (col & 1) dstRow[dstByte] = (dstRow[dstByte] & 0x0F) | ((val & 0x0F) << 4);
-            else         dstRow[dstByte] = (dstRow[dstByte] & 0xF0) | (val & 0x0F);
-        }
-    }
-
-    return out;
-}
-
-// Full refresh: clear display then draw
-void display_update() {
-    if (!_pfb || !_lfb) return;
-
-    unsigned long t0 = millis();
-    rotatePortraitToLandscape();
-    unsigned long t1 = millis();
-    Serial.printf("Rotation: %lums\n", t1 - t0);
-
-
-    epd_be_poweron();
-    epd_be_clear_area_cycles(epd_be_full_screen(), 6, 50);
-    epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb);
-    epd_be_poweroff_all();  // zero all control bits — fully silences TPS65185 oscillator
-
-    _partialCount = 0;
-}
-
 // Sleep refresh: preserve the panel's normal post-refresh hold state so the
 // sleep image remains latched correctly while the MCU enters deep sleep.
+// Intentionally NOT routed through the new intent API — sleep image draw
+// is a one-shot terminal operation that does its own clean clear+GC16 and
+// must not interact with the partial-update counter.
 void display_update_sleep() {
     if (!_pfb || !_lfb) return;
 
@@ -514,44 +516,41 @@ void display_update_sleep() {
     epd_be_clear_area_cycles(epd_be_full_screen(), 6, 50);
     epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb);
     epd_be_poweroff_all();  // zero all control bits for clean power state
-
-    _partialCount = 0;
+    _lastPoweroffMs = millis();
+    _framesSinceFullRefresh = 0;
 }
 
-// Medium refresh: 2 EPD clear cycles.
+// ─── Legacy shims onto the new intent API ─────────────────────────────
+// These keep existing UI callers (ui_reader, ui_library, ui_settings, …)
+// working unchanged. WP-1+ will migrate call sites to explicit
+// display_mark_dirty(Zone, ChangeKind) so the right waveform is chosen
+// per surface.
+
+void display_update() {
+    // Wake-from-sleep / heavy clean: forces a GC16 full refresh with
+    // 6-cycle clear and resets the anti-ghost counter.
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
+    display_flush();
+}
+
 void display_update_medium() {
-    if (!_pfb || !_lfb) return;
-
-    unsigned long t0 = millis();
-    rotatePortraitToLandscape();
-    unsigned long t1 = millis();
-    Serial.printf("Rotation: %lums\n", t1 - t0);
-
-
-    epd_be_poweron();
-    epd_be_clear_area_cycles(epd_be_full_screen(), 2, 50);
-    epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb);
-    epd_be_poweroff_all();  // zero all control bits — fully silences TPS65185 oscillator
-
-    _partialCount = 0;
+    // Legacy "medium" callers (chapter jump, settings exit) expect a
+    // flashing full refresh — route through WakeFull so display_flush()
+    // takes the full-clear path.
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
+    display_flush();
 }
 
-// Fast refresh: light 1-cycle clear. Used for page turns.
 void display_update_fast() {
-    if (!_pfb || !_lfb) return;
-
-    unsigned long t0 = millis();
-    rotatePortraitToLandscape();
-    unsigned long t1 = millis();
-    Serial.printf("Rotation: %lums\n", t1 - t0);
-
-
-    epd_be_poweron();
-    epd_be_clear_area_cycles(epd_be_full_screen(), 1, 40);
-    epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb);
-    epd_be_poweroff_all();  // zero all control bits — fully silences TPS65185 oscillator
-
-    _partialCount = 0;
+    // Single-cycle "fast" full-screen update — now a GL16 non-flashing
+    // partial covering the entire screen. The anti-ghost auto-upgrade
+    // inside display_flush() will promote to a clean GC16 every
+    // REFRESH_INTERVAL_READER frames.
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
 }
 
 // Rotate only a sub-region of the portrait framebuffer to landscape.
@@ -609,50 +608,229 @@ static uint8_t* rotatePortraitRegion(int px, int py, int pw, int ph, EpdRect& ou
 
 void display_update_reader_body(int x, int y, int w, int h, bool strongCleanup) {
     if (!_pfb) return;
-
-    unsigned long t0 = millis();
-    EpdRect area;
-    uint8_t* region = rotatePortraitRegion(x, y, w, h, area);
-    unsigned long t1 = millis();
-    Serial.printf("Partial rotation: %lums area=%ldx%ld (was full=%dx%d)\n",
-                  t1 - t0, (long)area.width, (long)area.height, PORTRAIT_W, PORTRAIT_H);
-
-    if (!region || area.width <= 0 || area.height <= 0) {
-        if (region) free(region);
-        display_update_fast();
-        return;
-    }
-
-    epd_be_poweron();
-    epd_be_clear_area_cycles(area, strongCleanup ? 2 : 1, strongCleanup ? 40 : 30);
-    epd_be_draw_grayscale_image(area, region);
-    epd_be_poweroff_all();
-
-    free(region);
-    _partialCount = 0;
+    // The (x, y, w, h) hint from the caller is currently ignored: WP-1+
+    // will replace this entry point with explicit zone marking from the
+    // reader. For now we map the request to Zone::ReaderBody (which
+    // already has the correct rect baked into the zone table) and use
+    // TextReflow intent (GL16, non-flashing). The strongCleanup flag is
+    // honored by escalating to StructuralRedraw, which the anti-ghost
+    // cadence will still upgrade to GC16 on schedule.
+    (void)x; (void)y; (void)w; (void)h;
+    display_begin_frame();
+    display_mark_dirty(Zone::ReaderBody,
+                       strongCleanup ? ChangeKind::StructuralRedraw
+                                     : ChangeKind::TextReflow);
+    display_flush();
 }
 
-// Partial update: draw without clearing (no white flash)
+// Partial update: legacy entry point that historically redrew the full
+// screen without a clear. Now mapped to a TextReflow pass over the three
+// reader zones (header + body + footer), which is what every caller
+// actually needed.
 void display_update_partial() {
-    if (!_pfb || !_lfb) return;
-
-    rotatePortraitToLandscape();
-
-
-    epd_be_poweron();
-    epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb);
-    epd_be_poweroff_all();
-
-    _partialCount++;
+    display_begin_frame();
+    display_mark_dirty(Zone::ReaderHeader, ChangeKind::TextReflow);
+    display_mark_dirty(Zone::ReaderBody,   ChangeKind::TextReflow);
+    display_mark_dirty(Zone::ReaderFooter, ChangeKind::TextReflow);
+    display_flush();
 }
 
-// Smart update: use partial unless full refresh is needed
+// Legacy smart-mode dispatch. fullRefresh==true forces a GC16 clean; the
+// non-full path is now handled by display_flush()'s anti-ghost counter,
+// so the old _partialCount-based threshold here is no longer needed.
 void display_update_mode(bool fullRefresh) {
-    if (fullRefresh || _partialCount >= PARTIAL_REFRESH_INTERVAL) {
+    if (fullRefresh) {
         display_update();
     } else {
         display_update_partial();
     }
+}
+
+// ─── Intent-based partial-update core ─────────────────────────────────
+
+// Strength ranking used by display_mark_dirty() to merge multiple marks
+// on the same zone within a single frame. Higher rank wins.
+static int changekind_rank(ChangeKind k) {
+    switch (k) {
+        case ChangeKind::WakeFull:         return 5;
+        case ChangeKind::SleepImage:       return 5;
+        case ChangeKind::AntiGhost:        return 4;
+        case ChangeKind::StructuralRedraw: return 3;
+        case ChangeKind::TextReflow:       return 2;
+        case ChangeKind::GlyphTick:        return 1;
+        case ChangeKind::HighlightToggle:  return 1;
+    }
+    return 0;
+}
+
+// Map ChangeKind → epdiy EpdDrawMode integer. Returns the raw int value
+// of MODE_GC16 / MODE_GL16 / MODE_DU4 from <epdiy.h>; we hardcode the
+// numeric values (see EPD_MODE_* constants near the top of this file) to
+// avoid pulling <epdiy.h> into display.cpp, which would clash with our
+// extern-C EpdRect typedef in epd_backend.h.
+static int changekind_to_mode(ChangeKind k) {
+    switch (k) {
+        case ChangeKind::GlyphTick:        return EPD_MODE_DU4;
+        case ChangeKind::HighlightToggle:  return EPD_MODE_DU4;
+        case ChangeKind::TextReflow:       return EPD_MODE_GL16;
+        case ChangeKind::StructuralRedraw: return EPD_MODE_GL16;
+        case ChangeKind::WakeFull:         return EPD_MODE_GC16;
+        case ChangeKind::SleepImage:       return EPD_MODE_GC16;
+        case ChangeKind::AntiGhost:        return EPD_MODE_GC16;
+    }
+    return EPD_MODE_GL16;
+}
+
+void display_begin_frame() {
+    for (int i = 0; i < (int)Zone::_Count; i++) {
+        _zones[i].dirty = false;
+        // Reset intent to a neutral default; mark_dirty will set the
+        // intent for any zone that actually changes this frame.
+        _zones[i].intent = ChangeKind::TextReflow;
+    }
+}
+
+void display_set_overlay_rect(int x, int y, int w, int h) {
+    if (x < 0) { w += x; x = 0; }
+    if (y < 0) { h += y; y = 0; }
+    if (x + w > PORTRAIT_W) w = PORTRAIT_W - x;
+    if (y + h > PORTRAIT_H) h = PORTRAIT_H - y;
+    if (w < 0) w = 0;
+    if (h < 0) h = 0;
+    _zones[(int)Zone::Overlay].x = x;
+    _zones[(int)Zone::Overlay].y = y;
+    _zones[(int)Zone::Overlay].w = w;
+    _zones[(int)Zone::Overlay].h = h;
+}
+
+void display_mark_dirty(Zone z, ChangeKind k) {
+    const int idx = (int)z;
+    if (idx < 0 || idx >= (int)Zone::_Count) return;
+    if (!_zones[idx].dirty) {
+        _zones[idx].dirty = true;
+        _zones[idx].intent = k;
+        return;
+    }
+    // Already dirty — keep whichever intent is stronger (e.g. a Text
+    // Reflow added on top of a GlyphTick should escalate to GL16).
+    if (changekind_rank(k) > changekind_rank(_zones[idx].intent)) {
+        _zones[idx].intent = k;
+    }
+}
+
+void display_force_full_refresh() {
+    display_begin_frame();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
+    display_flush();
+}
+
+void display_flush() {
+    if (!_pfb || !_lfb) return;
+
+    // Pass 1: classify the frame.
+    bool anyDirty = false;
+    bool isFullRefresh = false;
+    for (int i = 0; i < (int)Zone::_Count; i++) {
+        if (!_zones[i].dirty) continue;
+        anyDirty = true;
+        const ChangeKind k = _zones[i].intent;
+        if (k == ChangeKind::WakeFull ||
+            k == ChangeKind::AntiGhost ||
+            k == ChangeKind::SleepImage) {
+            isFullRefresh = true;
+        }
+    }
+    if (!anyDirty) return;
+
+    // Anti-ghost auto-upgrade: if this frame would push us at or beyond
+    // the threshold, escalate any dirty reader zone (and the FullScreen
+    // zone, if dirty) to AntiGhost so the full-clear path runs.
+    if (!isFullRefresh &&
+        _framesSinceFullRefresh + 1 >= REFRESH_INTERVAL_READER) {
+        for (int i = (int)Zone::ReaderHeader; i <= (int)Zone::ReaderFooter; i++) {
+            if (_zones[i].dirty) _zones[i].intent = ChangeKind::AntiGhost;
+        }
+        if (_zones[(int)Zone::FullScreen].dirty) {
+            _zones[(int)Zone::FullScreen].intent = ChangeKind::AntiGhost;
+        }
+        isFullRefresh = true;
+    }
+
+    // Read the temperature once per frame — cached at the backend, so a
+    // single call covers every zone we push below.
+    const int temp_c = epd_be_get_ambient_temp_cached();
+
+    // Power batching is wired up via _lastPoweroffMs (recorded below
+    // after epd_be_poweroff_all). The current backend (epd_be_poweroff_all
+    // → epdiy epd_poweroff) fully drops the rails, so skipping the next
+    // epd_be_poweron() is not yet safe. The hold window is reserved for
+    // when the backend grows a lightweight "hold rails warm" variant.
+    epd_be_poweron();
+
+    if (isFullRefresh) {
+        // Full-clear path: 6-cycle clear + GC16 GC redraw of the entire
+        // panel, exactly mirroring the legacy display_update() behavior.
+        // We render the whole portrait buffer into _lfb so that even if
+        // only the FullScreen zone was marked dirty, the visible result
+        // matches what's in the framebuffer.
+        unsigned long t0 = millis();
+        rotatePortraitToLandscape();
+        unsigned long t1 = millis();
+        Serial.printf("Flush rotation (full): %lums\n", t1 - t0);
+
+        epd_be_clear_area_cycles(epd_be_full_screen(), 6, 50);
+        epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb,
+                                    EPD_MODE_GC16, temp_c);
+    } else {
+        // Per-zone partial path. One epd_be_draw_grayscale_image call
+        // per dirty zone, all batched between the single poweron/off
+        // pair above. The FullScreen zone (used by the legacy fast/
+        // partial shims) is handled with _lfb to avoid a 253 KB
+        // malloc; sub-zones use rotatePortraitRegion()'s heap buffer.
+        for (int i = 0; i < (int)Zone::_Count; i++) {
+            if (!_zones[i].dirty) continue;
+            ZoneState& z = _zones[i];
+            if (z.w <= 0 || z.h <= 0) continue;
+
+            const int mode = changekind_to_mode(z.intent);
+
+            if ((Zone)i == Zone::FullScreen) {
+                // Whole-screen partial — use the PSRAM _lfb buffer.
+                rotatePortraitToLandscape();
+                epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb,
+                                            mode, temp_c);
+                continue;
+            }
+
+            // Sub-zone — rotate just this rect into a heap buffer.
+            EpdRect area;
+            uint8_t* region = rotatePortraitRegion(z.x, z.y, z.w, z.h, area);
+            if (!region || area.width <= 0 || area.height <= 0) {
+                if (region) free(region);
+                continue;
+            }
+            epd_be_draw_grayscale_image(area, region, mode, temp_c);
+            free(region);
+        }
+    }
+
+    epd_be_poweroff_all();
+    _lastPoweroffMs = millis();
+
+    // Counter management — update exactly once per frame, at the end.
+    if (isFullRefresh) {
+        _framesSinceFullRefresh = 0;
+    } else {
+        _framesSinceFullRefresh++;
+    }
+
+    // One-shot reset of the overlay rect so it doesn't leak into the
+    // next frame. Callers must re-set it each frame the overlay is
+    // dirty (display_set_overlay_rect + display_mark_dirty(Overlay,…)).
+    _zones[(int)Zone::Overlay].x = 0;
+    _zones[(int)Zone::Overlay].y = 0;
+    _zones[(int)Zone::Overlay].w = 0;
+    _zones[(int)Zone::Overlay].h = 0;
 }
 
 int display_text_width(const char* text) {

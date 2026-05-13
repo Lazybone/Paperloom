@@ -24,6 +24,68 @@ int  display_font_height();
 int  display_font_ascender();
 int  display_width();
 int  display_height();
+
+// ─── Intent-based partial-update API ──────────────────────────────────
+// UI callers declare what kind of change happened; the display layer maps
+// that intent to the right epdiy waveform mode and tracks anti-ghost
+// cadence (forced GC16 every REFRESH_INTERVAL_READER frames).
+//
+// Typical use from a UI frame:
+//     display_begin_frame();
+//     display_mark_dirty(Zone::ReaderBody, ChangeKind::TextReflow);
+//     display_mark_dirty(Zone::ReaderHeader, ChangeKind::GlyphTick);
+//     display_flush();
+//
+// Legacy display_update*() entry points above are now thin wrappers that
+// internally call the new API, so existing callers keep working until they
+// migrate to explicit zone+intent in later work packages.
+enum class ChangeKind : uint8_t {
+    GlyphTick,         // Battery icon redraw, clock tick    → DU4 (fast 4-grey)
+    HighlightToggle,   // Button / row selection             → DU4
+    TextReflow,        // Page-turn body, footer text        → GL16 (non-flashing)
+    StructuralRedraw,  // Tab / screen change, overlay open  → GL16
+    WakeFull,          // Wake from sleep — counter reset    → GC16 full + clear
+    SleepImage,        // Sleep image — preserve hold state  → GC16 (special path)
+    AntiGhost          // Forced periodic clean refresh      → GC16 full + clear
+};
+
+// Reader screen is split into three fixed zones; non-reader screens
+// (Library, Settings, Wifi setup, …) typically use Zone::FullScreen.
+// Zone::Overlay has a dynamic rect set via display_set_overlay_rect().
+enum class Zone : uint8_t {
+    ReaderHeader = 0,   // {0,   0, 540,  66}   — battery, title bar
+    ReaderBody   = 1,   // {0,  82, 540, 828}   — text body
+    ReaderFooter = 2,   // {0, 910, 540,  50}   — page nr, progress
+    Overlay      = 3,   // dynamic, set by caller
+    FullScreen   = 4,   // {0,   0, 540, 960}   — whole portrait surface
+    _Count       = 5
+};
+
+// Begin a new frame: clears all per-zone dirty flags. Call this once per
+// UI redraw, before any display_mark_dirty().
+void display_begin_frame();
+
+// Mark a zone as dirty with the given intent. Multiple marks on the same
+// zone in one frame keep the strongest intent (WakeFull/AntiGhost win
+// over StructuralRedraw, which wins over TextReflow, which wins over
+// GlyphTick/HighlightToggle).
+void display_mark_dirty(Zone z, ChangeKind k);
+
+// Set the rect for Zone::Overlay before display_flush(). Coordinates are
+// portrait-space (0..540, 0..960). The rect is reset to empty after each
+// flush, so it must be set every frame the overlay is dirty.
+void display_set_overlay_rect(int x, int y, int w, int h);
+
+// Push all dirty zones to the panel atomically: one waveform update per
+// dirty zone, batched between a single epd_be_poweron() / poweroff_all()
+// pair. Anti-ghost auto-upgrade kicks in after REFRESH_INTERVAL_READER
+// consecutive partial frames.
+void display_flush();
+
+// Force a full GC16 refresh of the entire screen and reset the partial
+// counter. Use after sleep wake or when the panel is visibly degraded.
+void display_force_full_refresh();
+
 // Font family identifiers — keep in sync with settings.h's fontFamily and
 // the static font lookup tables in display.cpp.  Stored as uint8_t in
 // settings so the on-disk schema stays compact.  FONT_FAMILY_COUNT lives
