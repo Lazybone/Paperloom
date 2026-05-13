@@ -269,7 +269,7 @@ def build_merged_binary(out_path: Path, dry_run: bool) -> bool:
 
 
 def bump_manifest_version(version: str, dry_run: bool) -> None:
-    """Update the version field of docs/manifest.json (web-installer)."""
+    """Update the version field of site/flasher/manifest.json (web-installer)."""
     if not MANIFEST.is_file():
         print(f"-> {MANIFEST.relative_to(REPO_ROOT)}: missing, skipping")
         return
@@ -384,7 +384,7 @@ def main() -> int:
     #   <Product>-<version>.bin    — friendly download name shown on the release page
     #   firmware.bin               — exact asset name the on-device OTA checker expects
     #   Paperloom-merged.bin       — single-file image consumed by the web installer
-    #                                (docs/manifest.json → esp-web-tools).
+    #                                (site/flasher/manifest.json → esp-web-tools).
     out_bin = BUILD_DIR / f"{args.product}-{args.version}.bin"
     out_ota = BUILD_DIR / "firmware.bin"
     out_merged = BUILD_DIR / "Paperloom-merged.bin"
@@ -431,12 +431,12 @@ def main() -> int:
         kind = "draft release" if args.draft else "release"
         print(f"done.  GitHub {kind} v{args.version} created with {asset_names} attached.")
         print(f"       Make sure the version-bump commit (config.h, README.md, CHANGELOG.md, "
-              f"docs/manifest.json) is pushed so the tag points at the right SHA.")
+              f"site/flasher/manifest.json) is pushed so the tag points at the right SHA.")
     else:
         rel_assets = " ".join(str(p.relative_to(REPO_ROOT)) for p in release_assets)
         print(f"done.  Upload {asset_names} to the GitHub release.")
         print(f"       firmware.bin is what the on-device OTA checker fetches.")
-        print(f"       Paperloom-merged.bin is what the docs/ web installer fetches.")
+        print(f"       Paperloom-merged.bin is what the site/flasher/ web installer fetches.")
         print(f"       Body: `{out_notes.relative_to(REPO_ROOT)}`.")
         print(f"       e.g.  gh release create v{args.version} {rel_assets} "
               f"-F {out_notes.relative_to(REPO_ROOT)} -t \"v{args.version}\"")
