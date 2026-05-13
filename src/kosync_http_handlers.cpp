@@ -33,6 +33,7 @@
 #include <stdint.h>
 #include <stdio.h>
 
+#include "kosync_pin_state.h"
 #include "settings.h"
 #include "tls_certs.h"
 
@@ -136,6 +137,106 @@ void send_error(int code, const char* key, const char* reason) {
     send_json(code, out);
 }
 
+// Short-form error for PIN-gate responses where the protocol stipulates a
+// single token (e.g. "pin_required", "rate_limited") as the entire error
+// value. Avoids the "key: reason" formatting used by send_error().
+void send_short_error(int code, const char* token) {
+    StaticJsonDocument<96> doc;
+    doc["ok"] = false;
+    doc["error"] = token;
+    String out;
+    serializeJson(doc, out);
+    send_json(code, out);
+}
+
+// Apply the PIN gate to a credential-changing endpoint. Returns true if
+// the caller may proceed with the original handler body. On false the
+// gate has already produced an HTTP response (401, 429, …) and the
+// handler must return immediately.
+//
+// Step ordering per concept §4 / WP-6c iter3:
+//   1. Lockout active                       → 429 + Retry-After.
+//   2. Body carries a valid PIN             → consume, fall through.
+//   3. Body carries an invalid/wrong PIN
+//      with an active PIN on file           → increment failCount, 401.
+//   4. Increment lands on lockout threshold → 429 + Retry-After.
+//   5. No active PIN OR no `pin` field      → generate fresh + 401.
+//      (Fresh-issue MUST NOT increment failCount.)
+bool apply_pin_gate() {
+    // Step 1: lockout check up front. Never display a PIN while locked.
+    {
+        uint32_t remaining_ms = 0;
+        if (kosync_pin_is_locked_out(&remaining_ms)) {
+            const uint32_t retry_after_s = (remaining_ms + 999u) / 1000u;
+            g_server->sendHeader("Retry-After", String(retry_after_s));
+            send_short_error(429, "rate_limited");
+            return false;
+        }
+    }
+
+    // Peek at the body for a pin field WITHOUT consuming it — the
+    // downstream handler re-parses the body for the real payload.
+    DynamicJsonDocument peekDoc(256);
+    if (g_server->hasArg("plain")) {
+        // Ignore deserialization errors here — if the body is malformed,
+        // the pin field is just absent and we fall into the "no pin
+        // present" branch below, which generates a fresh PIN and replies
+        // 401. The downstream handler will then report the real 400 on
+        // the next attempt with a valid PIN.
+        (void)deserializeJson(peekDoc, g_server->arg("plain"));
+    }
+    const bool     pin_field_present = peekDoc.containsKey("pin");
+    const uint32_t candidate         = peekDoc["pin"] | 0u;
+
+    if (pin_field_present) {
+        const KosyncPinResult vr = kosync_pin_validate(candidate);
+        if (vr == KosyncPinResult::Ok) {
+            return true;  // proceed with handler body
+        }
+        if (vr == KosyncPinResult::RateLimited) {
+            // Either the mismatch just tripped the lockout threshold, or
+            // we raced with another request that did. Re-fetch the
+            // remaining window and respond accordingly.
+            uint32_t rem = 0;
+            kosync_pin_is_locked_out(&rem);
+            const uint32_t s = (rem + 999u) / 1000u;
+            g_server->sendHeader("Retry-After", String(s));
+            send_short_error(429, "rate_limited");
+            return false;
+        }
+        // Mismatch / Expired / NoActive: if no PIN is currently issued,
+        // generate one so the user gets a new code on the e-paper. If a
+        // PIN is still active (the typical "wrong digits" path), do NOT
+        // issue a new one — the existing PIN remains valid for the next
+        // attempt and failCount has just been incremented inside
+        // validate().
+        if (!kosync_pin_is_active()) {
+            kosync_pin_generate();  // best-effort; ignored if locked
+        }
+        send_short_error(401, "pin_required");
+        return false;
+    }
+
+    // No `pin` field. Either issue a fresh PIN (if none active) or
+    // remind the client one is already pending.
+    if (kosync_pin_is_active()) {
+        send_short_error(401, "pin_required");
+        return false;
+    }
+    if (!kosync_pin_generate()) {
+        // Lockout race: we just hit lockout between the step-1 check and
+        // here. Surface the 429 + Retry-After consistently.
+        uint32_t rem = 0;
+        kosync_pin_is_locked_out(&rem);
+        const uint32_t s = (rem + 999u) / 1000u;
+        g_server->sendHeader("Retry-After", String(s));
+        send_short_error(429, "rate_limited");
+        return false;
+    }
+    send_short_error(401, "pin_required");
+    return false;
+}
+
 // ─── Handlers ────────────────────────────────────────────────────────────
 
 void handle_get() {
@@ -155,12 +256,11 @@ void handle_get() {
 void handle_post() {
     if (!g_server) return;
 
-    // TODO(WP-6c): PIN gate enforcement goes here.
-    //   • Check kosync_pin_is_locked_out() → 429 + Retry-After if locked.
-    //   • Check incoming `pin` field; on missing/invalid, generate a fresh PIN
-    //     (rate-limited) and return 401.
-    //   • On valid PIN → consume + proceed.
-    // Do NOT implement the gate yet; WP-6c owns it.
+    // WP-6c: PIN gate enforcement. Returns false (and has already sent the
+    // 401/429 response) when the request must NOT proceed.
+    if (!apply_pin_gate()) {
+        return;
+    }
 
     String body = g_server->arg("plain");
     if (body.length() > 1024) {
@@ -270,10 +370,10 @@ void handle_post() {
 void handle_post_register() {
     if (!g_server) return;
 
-    // TODO(WP-6c): PIN gate enforcement seam — same hooks as POST /api/kosync-settings.
-    //   • Check kosync_pin_is_locked_out() → 429 + Retry-After.
-    //   • Check incoming `pin` field; on missing/invalid → 401 with fresh PIN.
-    //   • On valid PIN → consume + proceed.
+    // WP-6c: same PIN gate as POST /api/kosync-settings.
+    if (!apply_pin_gate()) {
+        return;
+    }
 
     if (!g_server->hasArg("plain")) {
         send_json(400, String("{\"ok\":false,\"error\":\"missing body\"}"));
