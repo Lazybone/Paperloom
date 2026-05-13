@@ -26,6 +26,17 @@ describe("sanitizeXhtmlString", () => {
     expect(out).not.toMatch(/\stabindex=/i);
   });
 
+  it("retains <form>, <input>, <button> (CSP form-action 'none' handles abuse)", () => {
+    // EPUB content can legitimately include forms (e.g. educational books).
+    // We don't strip them — they're inert inside a reader, and the
+    // optimizer page's own CSP refuses form-action anyway.
+    const html = `<html xmlns="http://www.w3.org/1999/xhtml"><body><form><input/><button>X</button></form></body></html>`;
+    const out = sanitizeXhtmlString(html).html;
+    expect(out).toContain("<form");
+    expect(out).toContain("<input");
+    expect(out).toContain("<button");
+  });
+
   it("returns sanitized output even when the input is loose HTML", () => {
     // happy-dom parses this without flagging a parsererror, so the
     // fallback path is environment-dependent. The contract we care about

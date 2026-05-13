@@ -44,6 +44,18 @@ describe("[security] HTML sanitization post-conditions", () => {
   });
 });
 
+describe("[security] DOMParser ignores XXE entities", () => {
+  it("does not resolve a SYSTEM entity reference inside an EPUB-style XML doc", () => {
+    const xxe = `<?xml version="1.0"?>
+<!DOCTYPE foo [<!ENTITY xxe SYSTEM "file:///etc/passwd">]>
+<root>&xxe;</root>`;
+    const doc = new DOMParser().parseFromString(xxe, "application/xml");
+    const text = doc.documentElement?.textContent ?? "";
+    expect(text).not.toMatch(/root:/);
+    expect(text).not.toMatch(/\/bin\//);
+  });
+});
+
 describe("[security] no network egress during optimizeEpub", () => {
   let originalFetch: typeof globalThis.fetch | undefined;
 

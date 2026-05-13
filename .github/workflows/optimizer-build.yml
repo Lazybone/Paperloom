@@ -95,7 +95,7 @@ jobs:
 
       - name: Commit built artifacts (main only)
         if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-        uses: stefanzweifel/git-auto-commit-action@v5
+        uses: stefanzweifel/git-auto-commit-action@b863ae1933cb653a53c021fe36dbb774e1fb9403 # v5.0.1
         with:
           # SECONDARY loop guard: author appears as github-actions[bot] so
           # the auto-commits are visually distinct in the log.

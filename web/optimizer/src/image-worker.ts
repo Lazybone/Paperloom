@@ -37,6 +37,13 @@ self.addEventListener("message", async (ev: MessageEvent<EncodeRequest>) => {
 });
 
 async function handle(req: EncodeRequest): Promise<EncodeResponseOk> {
+  // Defence-in-depth: validate numeric bounds even though the main thread
+  // is the only sender. Malformed values (NaN, Infinity, negative, absurdly
+  // large) shouldn't be able to crash the worker into OOM.
+  assertBounded(req.maxWidth, "maxWidth", 1, 10000);
+  assertBounded(req.maxHeight, "maxHeight", 1, 10000);
+  assertBounded(req.jpegQuality, "jpegQuality", 0, 100);
+
   const blob = new Blob([new Uint8Array(req.bytes)], { type: req.srcMime });
   let bitmap: ImageBitmap;
   try {
@@ -78,6 +85,12 @@ async function handle(req: EncodeRequest): Promise<EncodeResponseOk> {
 
 class DecodeError extends Error {
   override name = "DecodeError";
+}
+
+function assertBounded(value: number, name: string, min: number, max: number): void {
+  if (!Number.isFinite(value) || value < min || value > max) {
+    throw new DecodeError(`worker: invalid ${name}=${value} (expected ${min}..${max})`);
+  }
 }
 
 function rgbaToGrayscale(rgba: Uint8ClampedArray): Uint8ClampedArray {
