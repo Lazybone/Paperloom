@@ -98,7 +98,7 @@ static void drawPosterNoCoverTile(const BookInfo& book, int x, int y, int w, int
     display_draw_filled_rect(x, y, w, h, 15);
     display_draw_rect(x, y, w, h, 8);
 
-    display_draw_filled_rect(x + 10, y + 10, w - 20, 20, 13);
+    display_draw_filled_rect(x + 10, y + 10, w - 20, 20, 15);
     const char* band = "BOOK";
     int bandW = display_text_width(band);
     display_draw_text(x + (w - bandW) / 2, y + 24, band, 0);
@@ -166,7 +166,7 @@ static void drawDefaultPoster(BookInfo& book, int x, int y, int w, int h) {
 
     display_draw_filled_rect(x, y, w, h, 15);
     display_draw_rect(x, y, w, h, 8);
-    display_draw_filled_rect(x + 10, y + 10, w - 20, 26, 13);
+    display_draw_filled_rect(x + 10, y + 10, w - 20, 26, 15);
 
     const char* band = "BOOK";
     int bandW = display_text_width(band);
@@ -197,7 +197,7 @@ static void drawDefaultPoster(BookInfo& book, int x, int y, int w, int h) {
 
 static void drawFilterTabs(int activeFilter) {
     int tabY = HEADER_HEIGHT;
-    display_draw_filled_rect(0, tabY, W, FILTER_TAB_H, 14);
+    display_draw_filled_rect(0, tabY, W, FILTER_TAB_H, 15);
 
     int tabW = W / NUM_FILTERS;
     for (int i = 0; i < NUM_FILTERS; i++) {
@@ -261,7 +261,7 @@ void ui_library_draw(
         if (currentIdx >= 0 && filter == FILTER_ALL) {
             int bannerH = FONT_H + 16;
             int bannerY = y + bannerH / 2 + 2;  // Vertically centered baseline
-            display_draw_filled_rect(0, y, W, bannerH, 14);
+            display_draw_filled_rect(0, y, W, bannerH, 15);
             display_draw_text(MARGIN_X, bannerY, "Continue Reading:", 0);
 
             String contTitle = books[currentIdx].title;
@@ -323,7 +323,7 @@ void ui_library_draw(
         if (currentIdx >= 0 && filter == FILTER_ALL) {
             int bannerH = FONT_H + 16;
             int bannerY = y + bannerH / 2 + 2;  // Vertically centered baseline
-            display_draw_filled_rect(0, y, W, bannerH, 14);
+            display_draw_filled_rect(0, y, W, bannerH, 15);
             display_draw_text(MARGIN_X, bannerY, "Continue Reading:", 0);
 
             String contTitle = books[currentIdx].title;

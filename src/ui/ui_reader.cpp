@@ -546,7 +546,7 @@ void ui_reader_toc_draw(BookReader& reader, int& tocScroll) {
         int tocChapter = reader.getTocChapterIndex(i);
         // Highlight current chapter
         if (tocChapter == currentCh) {
-            display_draw_filled_rect(0, y - 8, W, MENU_ITEM_H, 14);
+            display_draw_filled_rect(0, y - 8, W, MENU_ITEM_H, 15);
             display_draw_text(MARGIN_X, y + FONT_H - 8, ">", 0);
         }
 

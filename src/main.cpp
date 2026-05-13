@@ -570,6 +570,25 @@ static void enterDeepSleep(bool triggeredByButton) {
 
     delay(50);  // Brief settle time
 
+    // Power down radios. Arduino-ESP32 normally shuts these in deep sleep
+    // automatically, but doing it explicitly silences any half-initialized
+    // state from WiFi scans / OTA flows and avoids ~5-15 mA of residual
+    // current if the radio was mid-init when the user pressed sleep.
+    WiFi.disconnect(true, true);  // disable WiFi, erase RAM creds
+    WiFi.mode(WIFI_OFF);
+    btStop();
+
+    // Put the GT911 capacitive controller into deep sleep. Saves ~1 mA
+    // versus leaving the chip scanning the matrix until VCC drops.
+    // Recovery: hardware-resets itself on the next boot.
+    touch_sleep();
+
+    // Drop power to RTC peripherals we don't need to keep alive — only the
+    // ext1 wake source on BUTTON_PIN must survive sleep. Shaves a few µA.
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
+    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
+
     // CRITICAL: Disable GPIO wakeup source configured for light sleep.
     // If we don't clear this, the touch INT pin (GPIO 47) can trigger an
     // immediate wake because GPIO wake sources persist across sleep types.
@@ -587,14 +606,14 @@ static void enterDeepSleep(bool triggeredByButton) {
         Serial.flush();
     }
     delay(50);  // Brief settle time (reduced since we're not flushing)
-    
+
     // Hold GPIO pins in stable state before sleep
     gpio_pullup_en((gpio_num_t)BUTTON_PIN);
     gpio_pulldown_dis((gpio_num_t)BUTTON_PIN);
-    
+
     // Feed watchdog before deep sleep to ensure clean state
     esp_task_wdt_reset();
-    
+
     esp_deep_sleep_start();
 }
 
@@ -648,9 +667,14 @@ static bool canEnterLightSleep() {
 
 void setup() {
     Serial.begin(115200);
-    // No unconditional delay() here — the previous 500 ms wait was a
-    // host-terminal settle hack that costs every cold-boot user half a
-    // second. If you need it for development, gate behind a build flag.
+#if ARDUINO_USB_CDC_ON_BOOT
+    // USB-CDC blockiert per default 100 ms pro write, wenn der Host nicht
+    // enumeriert ist. Auf langen prints (debug_trace_boot_report) staut sich
+    // das so weit auf, dass die Idle-Task nicht mehr läuft → Task-WDT →
+    // Bootloop. Mit Timeout 0 sind alle Writes non-blocking (Bytes ohne
+    // Host gehen verloren — beim Debug akzeptabel).
+    Serial.setTxTimeoutMs(0);
+#endif
     Serial.println("\n=== T5 E-Reader Firmware (Portrait) ===");
     debug_trace_boot_report();
     debug_trace_mark("setup:start");
@@ -688,12 +712,64 @@ void setup() {
         Serial.println("Wake: button released, proceeding");
     }
 
+    // I²C-Bus-Recovery: nach Soft-Reset oder fehlgeschlagener Transaktion
+    // kann ein Slave SDA dauerhaft LOW halten (clock-stretching gone wrong)
+    // — der nächste Wire.begin findet den Bus blockiert vor und ESP-IDFs
+    // i2c_driver_install schlägt mit ESP_FAIL fehl, was später am ersten
+    // pca9555_set_config in epdiy zum panic abort führt.
+    //
+    // Recovery: bevor wir den I²C-Treiber installieren, treiben wir SCL
+    // manuell als Open-Drain und takten 16-mal — das schiebt jeden Slave
+    // aus seinem half-completed Transfer raus. Anschließend eine saubere
+    // STOP-Bedingung (SDA: low → high while SCL high) und der Bus ist
+    // wieder im Idle-Zustand.
+    pinMode(TOUCH_SDA, INPUT_PULLUP);
+    pinMode(TOUCH_SCL, INPUT_PULLUP);
+    delayMicroseconds(10);
+    if (digitalRead(TOUCH_SDA) == LOW) {
+        Serial.println("[I2C] SDA stuck LOW, bus recovery...");
+        for (int i = 0; i < 16 && digitalRead(TOUCH_SDA) == LOW; i++) {
+            pinMode(TOUCH_SCL, OUTPUT);
+            digitalWrite(TOUCH_SCL, LOW);
+            delayMicroseconds(10);
+            pinMode(TOUCH_SCL, INPUT_PULLUP);
+            delayMicroseconds(10);
+        }
+        // STOP condition: SDA: low → high while SCL high
+        pinMode(TOUCH_SDA, OUTPUT);
+        digitalWrite(TOUCH_SDA, LOW);
+        delayMicroseconds(10);
+        pinMode(TOUCH_SDA, INPUT_PULLUP);
+        delayMicroseconds(10);
+        Serial.printf("[I2C] Recovery done, SDA=%d\n", digitalRead(TOUCH_SDA));
+    }
+
     // Wire must own the I²C-0 driver BEFORE epdiy's display_init() runs.
     // epdiy's epd_board_v7 normally calls ESP_ERROR_CHECK(i2c_driver_install(...)),
     // but our patched copy (tools/patch_epdiy.py) tolerates ESP_ERR_INVALID_STATE
     // — so epdiy simply reuses Wire's driver instead of trying to install its own.
     // This lets BQ27220 + GT911 use plain Arduino Wire afterwards without conflict.
     Wire.begin(TOUCH_SDA, TOUCH_SCL);
+
+    // PCA9555 + TPS65185 brauchen nach Power-Up bis zu ~50 ms bis sie auf
+    // I²C antworten. Ohne Wartezeit schlägt der erste pca9555_set_config
+    // in epdiy's epd_board_init mit ESP_FAIL fehl und löst einen
+    // ESP_ERROR_CHECK-Abort aus → Bootloop.
+    delay(50);
+    {
+        int retries = 0;
+        uint8_t ack;
+        do {
+            Wire.beginTransmission(0x20);
+            ack = Wire.endTransmission();
+            if (ack == 0) break;
+            delay(20);
+        } while (++retries < 20);
+        if (ack != 0) {
+            Serial.printf("[I2C] PCA9555 @ 0x20 unreachable (ack=%u nach %d Versuchen)\n",
+                          ack, retries);
+        }
+    }
 
     debug_trace_mark("setup:before_display_init");
     display_init();

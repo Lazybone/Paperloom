@@ -45,6 +45,15 @@ bool touch_init() {
     return true;
 }
 
+void touch_sleep() {
+    if (!_initialized) return;
+    // GT911 command 0x05 = enter low-power sleep. Chip stops scanning the
+    // capacitive matrix; idle current drops from ~1-2 mA to <100 µA.
+    // Recovery requires hardware reset, which happens automatically on the
+    // next boot via touch_init() probing the bus.
+    _touch.sleep();
+}
+
 bool touch_read(TouchPoint &pt) {
     if (!_initialized) return false;
 

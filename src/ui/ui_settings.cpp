@@ -211,7 +211,7 @@ static int rowCountForPage(int page) {
 // Tab bar directly under header. Active tab inverts to white; band is light gray.
 static void drawSettingsTabs() {
     int tabY = HEADER_HEIGHT;
-    display_draw_filled_rect(0, tabY, W, SETTINGS_TAB_H, 14);
+    display_draw_filled_rect(0, tabY, W, SETTINGS_TAB_H, 15);
 
     const char* tabLabels[3] = {"Reading", "Library", "Device"};
     int tabW = W / 3;

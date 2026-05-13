@@ -29,16 +29,20 @@ Import("env")   # type: ignore[name-defined]  # provided by PlatformIO
 
 TARGET_REL = "epdiy/src/board/epd_board_v7.c"
 
-# v3 sentinel marker we leave in the patched file to detect re-runs.
-SENTINEL = "/* PATCHED-EPDIY-V3 */"
+# v5 sentinel marker we leave in the patched file to detect re-runs.
+# (V4 was a regression — it ran i2c_param_config on every boot, including
+# the Wire-already-owns branch, which silently re-programmed the I2C
+# peripheral underneath Wire and broke BQ27220 + GT911 transactions.
+# We're back to V3's behaviour: param_config only on first-time install.)
+SENTINEL = "/* PATCHED-EPDIY-V5 */"
 
 # The original standalone param_config line.
 PARAM_LINE_PATTERN = re.compile(
     r"[ \t]*ESP_ERROR_CHECK\(i2c_param_config\(EPDIY_I2C_PORT,\s*&conf\)\);\s*\n"
 )
 
-# The install line — either the original ESP_ERROR_CHECK form, or our v1/v2
-# patch from prior runs (both with and without ESP_FAIL tolerance).
+# The install line — either the original ESP_ERROR_CHECK form, or one of
+# our prior-version patches that we need to overwrite.
 INSTALL_PATTERN = re.compile(
     r"(?:"
     # Original
@@ -53,12 +57,26 @@ INSTALL_PATTERN = re.compile(
     r"do \{ esp_err_t _e = i2c_driver_install\(([^)]+)\); "
     r"if \(_e != ESP_OK && _e != ESP_FAIL && _e != ESP_ERR_INVALID_STATE\) "
     r"ESP_ERROR_CHECK\(_e\); \} while \(0\);"
+    r"|"
+    # v3: param_config only on first-time install
+    r"/\* PATCHED-EPDIY-V3 \*/ do \{ esp_err_t _e = i2c_driver_install\(([^)]+)\); "
+    r"if \(_e == ESP_OK\) \{ ESP_ERROR_CHECK\(i2c_param_config\(EPDIY_I2C_PORT, &conf\)\); \} "
+    r"else if \(_e != ESP_FAIL && _e != ESP_ERR_INVALID_STATE\) \{ ESP_ERROR_CHECK\(_e\); \} "
+    r"\} while \(0\);"
+    r"|"
+    # v4: param_config always (broke Wire — reverted)
+    r"/\* PATCHED-EPDIY-V4 \*/ do \{ esp_err_t _e = i2c_driver_install\(([^)]+)\); "
+    r"if \(_e == ESP_OK \|\| _e == ESP_FAIL \|\| _e == ESP_ERR_INVALID_STATE\) "
+    r"\{ ESP_ERROR_CHECK\(i2c_param_config\(EPDIY_I2C_PORT, &conf\)\); \} "
+    r"else \{ ESP_ERROR_CHECK\(_e\); \} "
+    r"\} while \(0\);"
     r")"
 )
 
 
 def _install_replacement(match: "re.Match[str]") -> str:
-    args = match.group(1) or match.group(2) or match.group(3)
+    args = (match.group(1) or match.group(2) or match.group(3)
+            or match.group(4) or match.group(5))
     return (
         f"{SENTINEL} "
         "do { "
@@ -67,7 +85,10 @@ def _install_replacement(match: "re.Match[str]") -> str:
         "if (_e == ESP_OK) { "
         "ESP_ERROR_CHECK(i2c_param_config(EPDIY_I2C_PORT, &conf)); "
         "} "
-        # Already installed (Wire owns it): don't re-config, don't bail.
+        # Already installed (Wire owns it): don't re-config (re-running
+        # i2c_param_config silently re-programs the peripheral and
+        # breaks Wire's slave devices like BQ27220 + GT911 even though
+        # the conf values are identical).
         "else if (_e != ESP_FAIL && _e != ESP_ERR_INVALID_STATE) { "
         "ESP_ERROR_CHECK(_e); "
         "} "

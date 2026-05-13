@@ -7,6 +7,7 @@ compile_commands.json
 
 # ─── User-specific config (contains WiFi credentials) ───────────────
 include/config.h
+docs/
 
 # ─── Compiled binaries ───────────────────────────────────────────────
 *.bin
