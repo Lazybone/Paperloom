@@ -121,6 +121,16 @@ static const int FONT_H = 50;  // UI font height — medium reader font advance_
 // Book list item height
 static const int BOOK_ITEM_H = FONT_H * 2 + 12;  // title + info + padding
 
+// ─── State-enum invariants ──────────────────────────────────────────
+// File-scope build-time check: STATE_SLEEP_REQUEST is a sentinel that must
+// stay immediately after the last real persistable state. The wake-time
+// kMaxKnownState guard depends on this ordering to reject the sentinel if
+// it ever leaks into Preferences. See include/state.h for the full contract.
+static_assert((int)STATE_KOSYNC_PIN_PROMPT + 1 == (int)STATE_SLEEP_REQUEST,
+              "STATE_SLEEP_REQUEST must remain immediately after the last "
+              "real persistable state. If you added a new persistable state, "
+              "place it BEFORE STATE_SLEEP_REQUEST and update kMaxKnownState.");
+
 
 // Wake banner — partial-update strip that overlays the sleep image with a
 // "Waking..." message for immediate user feedback. Currently unused: WP-6 of
@@ -973,12 +983,8 @@ void setup() {
         // and leave the screen frozen with no recovery path).
         // Last REAL persistable state — must be updated when adding new states.
         // Sentinels (STATE_SLEEP_REQUEST onward) are intentionally rejected if
-        // persisted.
+        // persisted. Adjacency invariant pinned by file-scope static_assert above.
         const int kMaxKnownState = (int)STATE_KOSYNC_PIN_PROMPT;
-        static_assert((int)STATE_KOSYNC_PIN_PROMPT + 1 == (int)STATE_SLEEP_REQUEST,
-                      "STATE_SLEEP_REQUEST must remain immediately after the last "
-                      "real persistable state. If you added a new persistable state, "
-                      "place it BEFORE STATE_SLEEP_REQUEST and update kMaxKnownState.");
         if (savedState < 0 || savedState > kMaxKnownState ||
             savedState == (int)STATE_BOOT) {
             Serial.printf("Wake: invalid savedState=%d, falling back to library\n", savedState);
