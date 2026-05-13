@@ -14,12 +14,14 @@
       script origins, so script-src is just 'self'.
     - connect-src includes the GitHub release hosts because manifest.json
       points at https://github.com/.../releases/latest/download/Paperloom-merged.bin,
-      which redirects to objects.githubusercontent.com / github-releases.githubusercontent.com.
-      Verified against site/flasher/manifest.json and src/ota_update.cpp:22-24.
+      which redirects to release-assets.githubusercontent.com (current as
+      of 2026-05) or, on older releases, objects.githubusercontent.com /
+      github-releases.githubusercontent.com. All four hosts are whitelisted
+      here and in src/ota_update.cpp isAllowedDownloadUrl().
     - worker-src includes blob: because esp-web-tools spawns the flashing worker
       from a blob URL it constructs at runtime.
   -->
-  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self'; font-src 'self'; img-src 'self' data: blob:; connect-src 'self' https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com https://release-assets.githubusercontent.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
 
   <link rel="stylesheet" href="../shared/fonts.css" />
   <link rel="stylesheet" href="../shared/design.css" />
