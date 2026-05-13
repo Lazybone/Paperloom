@@ -596,6 +596,16 @@ static void enterDeepSleep(bool triggeredByButton) {
             appState == STATE_WIFI_SETUP || appState == STATE_WIFI_KEYBOARD) {
             resumeState = (int)STATE_LIBRARY;
         }
+        // KoSync transient screens collapse to reader on sleep; release any
+        // held busy flag and any pending PIN flow so the next wake is clean.
+        if (appState == STATE_KOSYNC_SETUP || appState == STATE_SYNC_CONFLICT ||
+            appState == STATE_KOSYNC_PIN_PROMPT) {
+            resumeState = (int)STATE_READER;
+            if (kosync_is_coordinator_initialized()) {
+                kosync_get_coordinator().clearBusy();
+            }
+            kosync_pin_reset_state();
+        }
         prefs.putInt("sleepState", resumeState);
         prefs.putInt("sleepLibScrl", libraryScroll);
 
