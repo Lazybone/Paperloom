@@ -16,7 +16,7 @@
     - connect-src includes the GitHub release hosts because manifest.json
       points at https://github.com/.../releases/latest/download/Paperloom-merged.bin,
       which redirects to objects.githubusercontent.com / github-releases.githubusercontent.com.
-      Verified against docs/manifest.json and src/ota_update.cpp:22-24.
+      Verified against docs/flasher/manifest.json and src/ota_update.cpp:22-24.
     - worker-src includes blob: because esp-web-tools spawns the flashing worker
       from a blob URL it constructs at runtime.
   -->
