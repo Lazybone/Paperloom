@@ -21,13 +21,18 @@ const dev = process.argv.includes("--dev");
 rmSync(dist, { recursive: true, force: true });
 mkdirSync(dist, { recursive: true });
 
-/** Shared options for both bundles. */
+/** Shared options for both bundles.
+ *
+ * Production builds drop source maps entirely. The optimizer page enforces
+ * `connect-src 'none'` for the no-egress invariant, and Chrome DevTools
+ * auto-fetches `<bundle>.map` on open — CSP correctly refuses that. Dev
+ * builds keep external maps for debugging. */
 const common = {
   bundle: true,
   format: "esm",
   target: ["chrome119", "edge119", "es2022"],
   platform: "browser",
-  sourcemap: true,
+  sourcemap: dev ? "external" : false,
   treeShaking: true,
   legalComments: "none",
   minify: !dev,

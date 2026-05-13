@@ -4,7 +4,7 @@
  * Pages serves them next to the static HTML shell. We DO commit the
  * outputs — see WP-10 / plan note on pre-built artifacts.
  */
-import { copyFileSync, mkdirSync, existsSync } from "node:fs";
+import { copyFileSync, mkdirSync, existsSync, unlinkSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { dirname, join } from "node:path";
 
@@ -26,7 +26,13 @@ for (const [src, dst] of FILES) {
   const from = join(root, src);
   const to = join(repoRoot, dst);
   if (!existsSync(from)) {
-    console.warn(`copy-to-docs: missing ${src}; skipped`);
+    // Source missing — typical for production builds where source maps
+    // are dropped entirely. Remove any stale copy at the destination so
+    // browsers don't keep trying to fetch a map that violates CSP.
+    if (existsSync(to)) {
+      unlinkSync(to);
+      console.warn(`copy-to-docs: removed stale ${dst}`);
+    }
     continue;
   }
   copyFileSync(from, to);
