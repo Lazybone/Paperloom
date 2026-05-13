@@ -343,8 +343,15 @@ static void handleLibraryTouch(int x, int y) {
     AppState newState = ui_library_touch(x, y, books, libraryScroll, libraryFilter, filteredIndices);
 
     if (newState == STATE_READER) {
-        // First draw after opening a book: use medium refresh for cleaner display
+        // First draw after opening a book: use medium refresh for cleaner display.
+        // forceFullRefresh = true guarantees ui_reader_draw() invalidates its
+        // file-static header caches (s_zoneCacheValid / s_lastBatteryPct /
+        // s_lastBookmark in ui_reader.cpp). Without this, opening a different
+        // book leaves those caches matching the PRIOR book, and the header
+        // zone's delta check fires false-negative — title bar shows the old
+        // book's title for one or more frames.
         readerRefresh.fastRefresh = true;
+        readerRefresh.forceFullRefresh = true;
         readerRefresh.pageTurnsSinceFull = settings_get().refreshEveryPages - 1;  // triggers medium refresh
         appState = STATE_READER;
         needsRedraw = true;
@@ -420,7 +427,14 @@ static void handleSettingsTouch(int x, int y) {
     // medium refresh on every value tap defeated the partial-update path
     // and caused full-screen flashes when changing Font Size etc.
     if (newState == STATE_READER) {
+        // Returning from Settings → Reader. Force a full refresh so
+        // ui_reader_draw() invalidates its file-static header caches
+        // (s_zoneCacheValid / s_lastBatteryPct / s_lastBookmark in
+        // ui_reader.cpp). Those caches survived the trip through Settings
+        // and would otherwise mask a stale header zone until the next
+        // real battery/bookmark delta.
         readerRefresh.fastRefresh = false;
+        readerRefresh.forceFullRefresh = true;
     }
     appState = newState;
     needsRedraw = true;
