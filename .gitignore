@@ -15,6 +15,10 @@ include/config.h
 *.map
 *.o
 *.a
+# Exception: the merged firmware that ships next to the web flasher
+# stays in git so GitHub Pages can serve it same-origin (CORS workaround,
+# see tools/build.py + commit f4efee6).
+!site/flasher/firmware/Paperloom-merged.bin
 
 # ─── Splash-generator side outputs ───────────────────────────────────
 tools/splash_screen.bmp
