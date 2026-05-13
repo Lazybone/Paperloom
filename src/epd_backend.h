@@ -49,11 +49,19 @@ void    epd_be_clear_area_cycles(EpdRect area, int32_t cycles, int32_t cycle_tim
 //              Most callers should pass epd_be_get_ambient_temp_cached()
 //              so waveforms compensate for real panel temperature.
 //
+// Returns 0 on success or a non-zero error code mirroring the underlying
+// epdiy EpdDrawError bitfield (e.g. FAILED_ALLOC=0x10, MODE_NOT_FOUND=0x80,
+// NO_PHASES_AVAILABLE=0x100). The header exposes the value as a raw `int`
+// so callers do not need to include epdiy-internal headers; existing void-
+// context callers stay source-compatible because the int return is
+// discardable. Non-zero results are also logged to Serial inside the
+// backend for diagnosis.
+//
 // The C++ default arguments below keep legacy two-argument call sites
 // working until they migrate to explicit mode + temp (WP-0.2 in
 // docs/partial_updates_plan.md). Default arguments are a C++-only feature,
 // so the declaration with defaults lives outside the extern "C" block.
-void    epd_be_draw_grayscale_image(EpdRect area, uint8_t *data,
+int     epd_be_draw_grayscale_image(EpdRect area, uint8_t *data,
                                     int mode, int temp_c);
 EpdRect epd_be_full_screen();
 
@@ -71,9 +79,9 @@ int     epd_be_get_ambient_temp_cached();
 // level on some compilers, so the defaults are exposed here as a thin
 // inline wrapper instead. ABI is unchanged — calls resolve to the same
 // extern-C symbol above.
-inline void epd_be_draw_grayscale_image(EpdRect area, uint8_t *data) {
-    epd_be_draw_grayscale_image(area, data,
-                                EPD_BE_DEFAULT_MODE,
-                                EPD_BE_DEFAULT_TEMP_C);
+inline int epd_be_draw_grayscale_image(EpdRect area, uint8_t *data) {
+    return epd_be_draw_grayscale_image(area, data,
+                                       EPD_BE_DEFAULT_MODE,
+                                       EPD_BE_DEFAULT_TEMP_C);
 }
 #endif

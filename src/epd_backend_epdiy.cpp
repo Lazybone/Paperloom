@@ -23,6 +23,7 @@
 //   are byte-for-byte identical.
 #include <Arduino.h>  // millis()
 #include <string.h>   // memset for direct hl_state buffer reset
+#include <cstddef>    // offsetof for ABI-layout static_asserts
 #include "esp_task_wdt.h"
 
 #define EpdRect HostEpdRect
@@ -35,8 +36,20 @@ extern "C" {
 }
 
 // Confirm ABI compatibility between the two rect types at compile time.
+// sizeof guards against added/removed/padded fields; the four offsetof
+// asserts below additionally guard against field reordering — an upstream
+// epdiy refactor that, say, swapped width/height would still compile and
+// silently corrupt every draw call. Catch it at the compiler instead.
 static_assert(sizeof(HostEpdRect) == sizeof(::EpdRect),
               "HostEpdRect / epdiy EpdRect size mismatch");
+static_assert(offsetof(HostEpdRect, x)      == offsetof(::EpdRect, x),
+              "HostEpdRect / epdiy EpdRect: field x offset mismatch");
+static_assert(offsetof(HostEpdRect, y)      == offsetof(::EpdRect, y),
+              "HostEpdRect / epdiy EpdRect: field y offset mismatch");
+static_assert(offsetof(HostEpdRect, width)  == offsetof(::EpdRect, width),
+              "HostEpdRect / epdiy EpdRect: field width offset mismatch");
+static_assert(offsetof(HostEpdRect, height) == offsetof(::EpdRect, height),
+              "HostEpdRect / epdiy EpdRect: field height offset mismatch");
 
 static EpdiyHighlevelState hl_state;
 
@@ -149,8 +162,8 @@ void epd_be_clear_area_cycles(HostEpdRect area, int32_t cycles, int32_t cycle_ti
     }
 }
 
-void epd_be_draw_grayscale_image(HostEpdRect area, uint8_t *data,
-                                 int mode, int temp_c) {
+int epd_be_draw_grayscale_image(HostEpdRect area, uint8_t *data,
+                                int mode, int temp_c) {
     ::EpdRect a = { (int)area.x, (int)area.y, (int)area.width, (int)area.height };
     epd_copy_to_framebuffer(a, data, epd_hl_get_framebuffer(&hl_state));
 
@@ -162,13 +175,29 @@ void epd_be_draw_grayscale_image(HostEpdRect area, uint8_t *data,
     const int resolved_temp =
         (temp_c == EPD_BE_DEFAULT_TEMP_C) ? DEFAULT_TEMPERATURE_C : temp_c;
 
+    // Capture the EpdDrawError bitfield from the waveform driver. Silently
+    // dropping it (the old void signature) meant that on FAILED_ALLOC /
+    // MODE_NOT_FOUND / NO_PHASES_AVAILABLE the panel was not actually
+    // refreshed, but epdiy's back_fb had already been advanced to the new
+    // content — every subsequent partial diff was then computed against a
+    // baseline that didn't match what the panel actually shows, accumulating
+    // corruption until the next full GC16 clear.
+    enum EpdDrawError err;
     const int fw = epd_width();
     const int fh = epd_height();
     if (a.x == 0 && a.y == 0 && a.width == fw && a.height == fh) {
-        epd_hl_update_screen(&hl_state, resolved_mode, resolved_temp);
+        err = epd_hl_update_screen(&hl_state, resolved_mode, resolved_temp);
     } else {
-        epd_hl_update_area(&hl_state, resolved_mode, resolved_temp, a);
+        err = epd_hl_update_area(&hl_state, resolved_mode, resolved_temp, a);
     }
+
+    if (err != EPD_DRAW_SUCCESS) {
+        Serial.printf("[EPD] draw error 0x%x area=(%d,%d,%d,%d) mode=0x%x\n",
+                      (unsigned)err,
+                      (int)a.x, (int)a.y, (int)a.width, (int)a.height,
+                      (unsigned)resolved_mode);
+    }
+    return (int)err;
 }
 
 HostEpdRect epd_be_full_screen() {
