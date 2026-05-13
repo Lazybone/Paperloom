@@ -401,9 +401,15 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
 
     debug_trace_mark("ui_reader_draw:before_refresh");
     if (refresh.forceFullRefresh) {
-        // Explicit full path — also resets _framesSinceFullRefresh in
-        // display.cpp so the anti-ghost counter restarts cleanly.
-        display_force_full_refresh();
+        // Explicit full path. We deliberately do NOT call
+        // display_force_full_refresh() here: that helper calls
+        // display_begin_frame() internally, which would silently clear
+        // the three WakeFull zone marks we set above. Instead we drive
+        // display_flush() directly — WakeFull on any dirty zone routes
+        // the whole frame through the GC16 6-cycle clear path inside
+        // display_flush() and resets _framesSinceFullRefresh to 0
+        // exactly like display_force_full_refresh() would.
+        display_flush();
         refresh.forceFullRefresh = false;
         refresh.pageTurnsSinceFull = 0;
     } else {
@@ -863,13 +869,20 @@ AppState ui_reader_toc_touch(int x, int y, BookReader& reader,
             // (ZIP decompression + HTML strip + text wrap). Without this, the TOC
             // screen stays visible while the CPU works, then the EPD goes blank for
             // the 6-cycle clear, making it look like a freeze/wedge.
+            //
+            // Intent: AntiGhost (GC16 full-clear) — this both renders the splash
+            // cleanly and resets _framesSinceFullRefresh to 0 inside
+            // display_flush(). Without that reset the subsequent
+            // s_overlayDismissed reader-redraw in ui_reader_draw() would tick the
+            // partial-update counter a second time for the same logical user
+            // action, drifting the anti-ghost cadence.
             display_begin_frame();
             display_set_font_size(2);  // overlay text in UI font
             display_fill_screen(15);
             const char* loadMsg = "Loading chapter...";
             int loadW = display_text_width(loadMsg);
             display_draw_text((W - loadW) / 2, H / 2, loadMsg, 6);
-            display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+            display_mark_dirty(Zone::FullScreen, ChangeKind::AntiGhost);
             display_flush();
 
             refresh.fastRefresh = false;
@@ -997,13 +1010,19 @@ AppState ui_reader_bookmarks_touch(int x, int y, BookReader& reader,
                 // Tap bookmark → jump to it
                 // Show loading indicator immediately so the user knows the device
                 // is working (ZIP decompression can take several seconds).
+                //
+                // Intent: AntiGhost (GC16 full-clear) — same rationale as the
+                // TOC chapter-jump splash above: resets _framesSinceFullRefresh
+                // to 0 so the s_overlayDismissed reader-redraw that follows
+                // does not double-tick the partial-update counter for one
+                // logical user action.
                 display_begin_frame();
                 display_set_font_size(2);  // overlay text in UI font
                 display_fill_screen(15);
                 const char* loadMsg = "Loading chapter...";
                 int loadW = display_text_width(loadMsg);
                 display_draw_text((W - loadW) / 2, H / 2, loadMsg, 6);
-                display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+                display_mark_dirty(Zone::FullScreen, ChangeKind::AntiGhost);
                 display_flush();
 
                 refresh.fastRefresh = false;

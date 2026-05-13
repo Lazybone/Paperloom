@@ -103,6 +103,15 @@ void display_flush();
 
 // Force a full GC16 refresh of the entire screen and reset the partial
 // counter. Use after sleep wake or when the panel is visibly degraded.
+//
+// WARNING: This helper is fire-and-forget — it calls display_begin_frame()
+// internally, which clears every zone's dirty flag. Therefore it MUST NOT
+// be called after the caller has already done its own
+// display_begin_frame() + display_mark_dirty(...) sequence. In that case
+// the zone marks would be silently discarded. Drive display_flush()
+// directly instead and mark at least one zone with ChangeKind::WakeFull
+// (or AntiGhost / SleepImage) — the full-clear path inside display_flush()
+// will run and reset _framesSinceFullRefresh to 0 just like this helper.
 void display_force_full_refresh();
 
 // Font family identifiers — keep in sync with settings.h's fontFamily and

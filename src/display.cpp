@@ -744,6 +744,11 @@ void display_mark_dirty(Zone z, ChangeKind k) {
 }
 
 void display_force_full_refresh() {
+    // Fire-and-forget. The display_begin_frame() below clears all zone
+    // dirty flags, so callers MUST NOT pre-mark zones before calling
+    // this — see the warning in display.h. If you need to flush an
+    // already-marked frame through the full-clear path, mark at least
+    // one zone with WakeFull and call display_flush() directly.
     display_begin_frame();
     display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
     display_flush();
