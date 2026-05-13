@@ -29,7 +29,8 @@ const char* button_action_name(uint8_t action) {
 // out of main.cpp and so it can be unit-tested in isolation. The dispatcher
 // in main.cpp must add:
 //   case BTN_ACTION_KOSYNC_SYNC: button_action_kosync_sync(); break;
-extern AppState appState;
+extern void setAppState(AppState state);
+extern AppState getAppState();
 extern void setNeedsRedraw(bool);
 
 void button_action_kosync_sync() {
@@ -41,7 +42,8 @@ void button_action_kosync_sync() {
     // Guard: only fire from reader / reader-menu context. Ignore button
     // while in modal states (library, conflict dialog, settings, etc.) so
     // a stray press cannot trigger sync from the wrong screen.
-    if (appState != STATE_READER && appState != STATE_MENU) {
+    AppState cur = getAppState();
+    if (cur != STATE_READER && cur != STATE_MENU) {
         return;
     }
     // Settings precheck (mirror reader-menu)
@@ -57,7 +59,7 @@ void button_action_kosync_sync() {
     SyncResult res = kosync_get_coordinator().syncNow();
     if (res.hasConflict) {
         ui_sync_conflict_set_data(res);
-        appState = STATE_SYNC_CONFLICT;
+        setAppState(STATE_SYNC_CONFLICT);
         setNeedsRedraw(true);
     } else if (res.toast.length() > 0) {
         ui_toast_show(res.toast, 2500, !res.success);

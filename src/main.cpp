@@ -63,6 +63,7 @@ BookReader reader;
 
 // ─── UI module callbacks ─────────────────────────────────────────────
 void setAppState(AppState state) { appState = state; }
+AppState getAppState() { return appState; }
 void setNeedsRedraw(bool val) { needsRedraw = val; }
 void setReaderFastRefresh(bool val) { readerRefresh.fastRefresh = val; }
 void resetReaderPageTurns() { readerRefresh.pageTurnsSinceFull = 0; }
@@ -1248,6 +1249,9 @@ void button_action_execute(uint8_t action) {
                 readerRefresh.fastRefresh = false;
                 needsRedraw = true;
             }
+            break;
+        case BTN_ACTION_KOSYNC_SYNC:
+            button_action_kosync_sync();
             break;
         default:
             break;
