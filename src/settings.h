@@ -45,6 +45,15 @@ struct Settings {
     uint8_t bootButtonTapAction;
     uint8_t bootButtonDoubleAction;
     uint8_t bootButtonLongAction;
+
+    // KoSync (WP-3) — progress-sync server credentials. The plaintext
+    // password NEVER reaches this layer; callers in WP-5 / WP-6 hash it
+    // (MD5 hex, 32 lowercase chars) before invoking settings_save().
+    String   kosyncServer;             // https://-only; default "https://kosync.eu" when never set
+    String   kosyncUser;               // [A-Za-z0-9_.-]{1,32}; empty if unconfigured
+    String   kosyncKey;                // MD5 hex of password (32 lowercase hex chars); empty if unconfigured
+    String   kosyncDeviceName;         // ≤32 chars; defaults to "paperloom-<last4-MAC>" on first load
+    bool     kosyncCredentialsInvalid; // Runtime-only flag (NOT persisted): set on load when stored values fail validation
 };
 
 void settings_init();           // Load from SD or create defaults
