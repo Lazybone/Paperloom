@@ -4,6 +4,8 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+## v0.2.2 — 2026-05-13
+
 ### Added
 - **GitHub Pages Workshop**: the install page at `lazybone.github.io/Paperloom/`
   is now a hub with two cards. The existing web installer moved to
