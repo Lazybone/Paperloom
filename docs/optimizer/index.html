@@ -210,6 +210,41 @@
       max-width: var(--measure-prose);
       margin: 2rem 0 0;
     }
+
+    .metadata-panel[hidden] { display: none; }
+    .metadata-panel {
+      background: var(--surface);
+      border: 1px solid var(--surface-edge);
+      border-radius: var(--radius-card);
+      padding: 1.5rem 1.75rem;
+      margin-bottom: 2rem;
+      box-shadow: var(--shadow-card);
+    }
+    .metadata-panel form {
+      display: grid;
+      gap: 0.6rem;
+      max-width: 32rem;
+    }
+    .metadata-panel label {
+      font-size: 0.85rem;
+      color: var(--ink-muted);
+      font-weight: 500;
+    }
+    .metadata-panel input {
+      font: inherit;
+      font-size: 0.97rem;
+      padding: 0.55rem 0.75rem;
+      border: 1px solid var(--surface-edge);
+      border-radius: 8px;
+      background: var(--bg);
+      color: var(--ink);
+      transition: border-color var(--duration-fast) var(--ease);
+    }
+    .metadata-panel input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px oklch(from var(--accent) l c h / 0.18);
+    }
   </style>
 </head>
 <body>
@@ -262,6 +297,23 @@
         <label><input type="checkbox" id="light-novel" /> Light Novel mode</label>
       </div>
     </fieldset>
+
+    <!--
+      Optional metadata-edit panel. Hidden by default; WP-7 (UI binding)
+      shows this whenever the user double-clicks a queue item or asks for
+      "edit title/author". Stays out of the main flow so the drop → optimize
+      → download path remains a single straight line.
+    -->
+    <section id="metadata" class="metadata-panel" hidden aria-labelledby="metadata-heading">
+      <h2 id="metadata-heading" class="section-title">Edit metadata</h2>
+      <p class="section-lede">Override title and author for the selected book.</p>
+      <form id="metadata-form">
+        <label for="metadata-title">Title</label>
+        <input id="metadata-title" name="title" type="text" autocomplete="off" />
+        <label for="metadata-author">Author</label>
+        <input id="metadata-author" name="author" type="text" autocomplete="off" />
+      </form>
+    </section>
 
     <ul id="queue" class="queue" aria-live="polite" aria-relevant="additions text"></ul>
 
