@@ -8,7 +8,7 @@
       "chipFamily": "ESP32-S3",
       "parts": [
         {
-          "path": "https://github.com/Lazybone/Paperloom/releases/latest/download/Paperloom-merged.bin",
+          "path": "./firmware/Paperloom-merged.bin",
           "offset": 0
         }
       ]

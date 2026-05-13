@@ -431,6 +431,16 @@ def main() -> int:
     copy_binary([out_bin, out_ota], args.dry_run)
     merged_ok = build_merged_binary(out_merged, args.dry_run)
 
+    # Mirror the merged binary into site/flasher/firmware/ so the
+    # esp-web-install-button can fetch it same-origin. GitHub release
+    # download URLs don't ship CORS headers, so the cross-origin fetch
+    # from the Pages-hosted flasher would get blocked otherwise.
+    if merged_ok:
+        print(f"-> {SITE_FIRMWARE.relative_to(REPO_ROOT)}: mirror merged image")
+        if not args.dry_run:
+            SITE_FIRMWARE.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copyfile(out_merged, SITE_FIRMWARE)
+
     body_for_notes = unreleased_body
     if not args.skip_changelog:
         body_for_notes = rewrite_changelog(args.version, args.date, args.dry_run)
