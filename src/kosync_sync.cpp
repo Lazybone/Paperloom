@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <assert.h>
 #include <math.h>
+#include <memory>
 #include <stdlib.h>
 #include <time.h>
 
@@ -133,6 +134,7 @@ bool push_status_to_toast(int status, const String& err, String& outToast,
 
 KosyncSyncCoordinator& kosync_initialize_coordinator(BookReader& reader) {
     if (!g_coordinator) {
+        // Note: project defaults to C++11; std::make_unique requires C++14.
         g_coordinator.reset(new KosyncSyncCoordinator(reader));
     }
     return *g_coordinator;

@@ -4,6 +4,7 @@
 #include <WiFi.h>
 #include <HTTPClient.h>
 #include <ArduinoJson.h>
+#include <memory>
 
 // ─── Constants ──────────────────────────────────────────────────────
 
@@ -151,6 +152,7 @@ bool KosyncClient::validateDocHash_(const String& h) const {
 // with chapter loading; heap pressure acceptable. PSRAM not required.
 void KosyncClient::ensureClient_() {
     if (client_) return;
+    // Note: project defaults to C++11; std::make_unique requires C++14.
     client_.reset(new WiFiClientSecure());
     // Pin the project trust bundle. Without this the ESP32-S3 Arduino
     // build has no CA store at all — connections would either fail or

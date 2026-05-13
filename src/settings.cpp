@@ -323,6 +323,15 @@ static bool apply_settings_json(const String& json, const char* sourceLabel) {
         String srv = doc["kosyncServer"].as<const char*>() ? String(doc["kosyncServer"].as<const char*>()) : String();
         if (srv.length() > 256) srv = "";          // length cap — reject silently
         srv = normalize_https_scheme(srv);
+        // WP-3 fix (iter-1 SEC-LOW): also enforce https:// on load. A manually-
+        // edited settings file could carry an http:// URL; without this guard,
+        // the value would only fail downstream in KosyncClient with a generic
+        // "Server nicht erreichbar" toast.
+        if (srv.length() > 0 && !srv.startsWith("https://")) {
+            Serial.printf("[settings] kosyncServer not https:// → reset\n");
+            srv = "";
+            _settings.kosyncCredentialsInvalid = true;
+        }
         _settings.kosyncServer = srv;              // empty here = deliberate clear
     } else {
         _settings.kosyncServer = KOSYNC_DEFAULT_SERVER;
