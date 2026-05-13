@@ -14,21 +14,21 @@ All notable changes to this firmware will be documented in this file.
   prunes unused CSS, repairs the TOC, normalises text (whitespace,
   OCR-ligatures, smart quotes, NFC), and re-packages the EPUB. Everything
   runs in the browser tab — no upload, no analytics, no server.
-- Shared design layer at `docs/shared/` (`design.css`, `fonts.css`).
+- Shared design layer at `site/shared/` (`design.css`, `fonts.css`).
   Hub, flasher, and optimizer all import the same OKLCH "Paper/Lamplight"
   tokens, Fraunces + Inter typography, and section primitives.
 - `web/optimizer/` npm workspace (TypeScript + esbuild + Vitest +
   GoogleFonts SRI-friendly @import). Output bundles land in
-  `docs/optimizer/optimizer.js` + `docs/optimizer/image-worker.js`,
+  `site/optimizer/optimizer.js` + `site/optimizer/image-worker.js`,
   enforced under a 200 KB gzipped budget by `scripts/size-check.mjs`.
 - GitHub Actions workflow `.github/workflows/optimizer-build.yml` that
   installs, lints, tests, builds, gates bundle sizes, and commits the
-  static artifacts back to `docs/optimizer/` for GitHub Pages.
+  static artifacts back to `site/optimizer/` for GitHub Pages.
 - `LICENSES/MIT-epubkit.txt` records the upstream MIT attribution.
 
 ### Changed
-- `docs/index.html` is now the Workshop hub; the install card moved to
-  `/docs/flasher/`. esp-web-tools v10.2.1 is pinned with SRI on the
+- `site/index.html` is now the Workshop hub; the install card moved to
+  `/site/flasher/`. esp-web-tools v10.2.1 is pinned with SRI on the
   entry module. CSP on every page is explicit per surface (hub strict,
   flasher allows unpkg + GitHub release hosts, optimizer denies all
   network egress).
@@ -39,11 +39,15 @@ All notable changes to this firmware will be documented in this file.
   to the optional EPUB optimizer.
 
 ### Removed
-- The legacy duplicate `docs/manifest.json` at the repo root. Firmware
-  OTA reads `https://api.github.com/repos/Lazybone/Paperloom/releases/latest`
+- The legacy duplicate `manifest.json` at the site root. Firmware OTA
+  reads `https://api.github.com/repos/Lazybone/Paperloom/releases/latest`
   directly (see `src/ota_update.cpp:165`); only the esp-web-install
   button consumed `manifest.json` and it now reads
-  `docs/flasher/manifest.json` via its relative attribute.
+  `site/flasher/manifest.json` via its relative attribute.
+- The `docs/` directory was renamed to `site/`. GitHub Pages is now
+  served via a GitHub Actions workflow that publishes `site/` instead of
+  the legacy "deploy from /docs" branch source. The folder name now
+  honestly describes what's inside (the deployed web app, not docs).
 
 ## v0.2.1 — 2026-05-12
 

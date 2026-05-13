@@ -4,9 +4,9 @@
  * OKLCH palette, warm cream + ink + forest accent.
  *
  * Imported by:
- *   - docs/index.html         (hub)
- *   - docs/flasher/index.html (relocated web installer)
- *   - docs/optimizer/index.html (EPUB optimizer shell)
+ *   - site/index.html         (hub)
+ *   - site/flasher/index.html (relocated web installer)
+ *   - site/optimizer/index.html (EPUB optimizer shell)
  *
  * Page-local CSS (install card, optimizer queue, etc.) stays inline in the
  * page that owns it. This file holds tokens + primitives only.

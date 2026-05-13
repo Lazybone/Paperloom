@@ -67,6 +67,14 @@
       </label>
     </section>
 
+    <!--
+      File cards — one per dropped EPUB, with editable title/author and
+      a remove button. Sits between the drop zone and the options form,
+      matching the epubkit layout. Per-file progress + download lives in
+      the #queue further down (under the options + Optimize CTA).
+    -->
+    <section id="file-cards" class="file-cards" aria-live="polite" aria-label="Selected EPUB files"></section>
+
     <form id="options" class="options" aria-labelledby="options-heading">
       <header class="options-head">
         <h2 id="options-heading">Options</h2>
@@ -189,13 +197,26 @@
       </fieldset>
 
       <button type="submit" id="optimize-cta" class="primary-cta" disabled>
-        <svg viewBox="0 0 24 24" aria-hidden="true">
+        <svg class="cta-icon-upload" viewBox="0 0 24 24" aria-hidden="true">
           <path d="M12 16V4M6 10l6-6 6 6" />
           <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
         </svg>
-        <span>Optimize EPUBs</span>
+        <svg class="cta-icon-spinner" viewBox="0 0 24 24" aria-hidden="true">
+          <circle cx="12" cy="12" r="9" />
+        </svg>
+        <span class="cta-label">Optimize EPUBs</span>
       </button>
     </form>
+
+    <!--
+      Processing section appears once Optimize is clicked. Section header
+      mirrors the epubkit "Processing" affordance; per-file cards inside
+      `#queue` show the live progress + inline download button.
+    -->
+    <section id="processing" class="processing" hidden aria-labelledby="processing-heading">
+      <h2 id="processing-heading" class="section-title">Processing</h2>
+    </section>
+    <ul id="queue" class="queue" aria-live="polite" aria-relevant="additions text"></ul>
 
     <!--
       Optional metadata-edit panel. Hidden by default; WP-7 (UI binding)
@@ -214,14 +235,10 @@
       </form>
     </section>
 
-    <ul id="queue" class="queue" aria-live="polite" aria-relevant="additions text"></ul>
-
     <section id="progress" class="progress" hidden aria-live="polite">
       <h2 class="section-title">Working</h2>
       <p class="section-lede" id="progress-detail">Preparing the pipeline…</p>
     </section>
-
-    <div id="downloads" class="downloads" aria-live="polite"></div>
 
     <p class="privacy-note">
       Books never leave this browser tab. There is no upload, no analytics, no telemetry.

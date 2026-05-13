@@ -63,6 +63,8 @@ export {
   isKnownError,
   userMessageFor,
 } from "./errors.js";
+export { peekMetadata } from "./lib/peek-metadata.js";
+export type { PeekResult } from "./lib/peek-metadata.js";
 
 /** Default option set, used by both preset resolution and tests. */
 export function defaultOptions(): OptimizeOptions {

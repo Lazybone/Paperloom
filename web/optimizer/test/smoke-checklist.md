@@ -74,9 +74,9 @@ In the optimizer:
 - [ ] `dist/optimizer.js.gz` ≤ 195 KB
 - [ ] `dist/image-worker.js.gz` ≤ 25 KB
 - [ ] `docs/index.html.gz` ≤ 30 KB
-- [ ] `docs/flasher/index.html.gz` ≤ 20 KB
-- [ ] `docs/optimizer/index.html.gz` ≤ 15 KB
-- [ ] `docs/shared/design.css.gz` ≤ 12 KB
+- [ ] `site/flasher/index.html.gz` ≤ 20 KB
+- [ ] `site/optimizer/index.html.gz` ≤ 15 KB
+- [ ] `site/shared/design.css.gz` ≤ 12 KB
 
 ## Sign-off
 

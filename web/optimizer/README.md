@@ -10,11 +10,11 @@ Nothing leaves the browser. There is no upload, no telemetry, no analytics.
 
 ## Build outputs
 
-`npm run build` writes to the sibling `docs/optimizer/` directory consumed by GitHub Pages:
+`npm run build` writes to the sibling `site/optimizer/` directory consumed by GitHub Pages:
 
-- `docs/optimizer/optimizer.js` — main ESM bundle (≤ 200 KB gzipped, enforced at 195 KB by `scripts/size-check.mjs`)
-- `docs/optimizer/image-worker.js` — dedicated worker for off-main-thread image processing (≤ 25 KB gzipped)
-- `docs/optimizer/ui.css` — optimizer-only styling that's larger than fits the page-local file
+- `site/optimizer/optimizer.js` — main ESM bundle (≤ 200 KB gzipped, enforced at 195 KB by `scripts/size-check.mjs`)
+- `site/optimizer/image-worker.js` — dedicated worker for off-main-thread image processing (≤ 25 KB gzipped)
+- `site/optimizer/ui.css` — optimizer-only styling that's larger than fits the page-local file
 
 ## Layout
 
@@ -60,7 +60,7 @@ test/
 scripts/
   build.mjs                esbuild driver
   size-check.mjs           Gate at 195 KB gz (main) / 25 KB gz (worker)
-  copy-to-docs.mjs         Drop artifacts into docs/optimizer/
+  copy-to-docs.mjs         Drop artifacts into site/optimizer/
   bundle-baseline.mjs      Re-run the size baseline survey
 ```
 
@@ -68,7 +68,7 @@ scripts/
 
 ```
 npm install            # install deps
-npm run build          # compile + size-check + copy to docs/optimizer/
+npm run build          # compile + size-check + copy to site/optimizer/
 npm test               # vitest single run
 npm run test:watch     # vitest watch mode
 npm run lint           # eslint

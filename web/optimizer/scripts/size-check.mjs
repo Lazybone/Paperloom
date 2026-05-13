@@ -11,11 +11,11 @@
  *
  * Also checks docs/-side static pages (gzipped) when run from CI after
  * copy-to-docs runs:
- *   - docs/index.html             ≤ 30 KB
- *   - docs/flasher/index.html     ≤ 20 KB
- *   - docs/optimizer/index.html   ≤ 15 KB
- *   - docs/shared/design.css      ≤ 12 KB
- *   - docs/shared/fonts.css       ≤ 3 KB
+ *   - site/index.html             ≤ 30 KB
+ *   - site/flasher/index.html     ≤ 20 KB
+ *   - site/optimizer/index.html   ≤ 15 KB
+ *   - site/shared/design.css      ≤ 12 KB
+ *   - site/shared/fonts.css       ≤ 3 KB
  */
 import { readFileSync, existsSync } from "node:fs";
 import { gzipSync } from "node:zlib";
@@ -32,11 +32,11 @@ const KB = 1024;
 const TARGETS = [
   [join(root, "dist/optimizer.js"), 195 * KB],
   [join(root, "dist/image-worker.js"), 25 * KB],
-  [join(repoRoot, "docs/index.html"), 30 * KB],
-  [join(repoRoot, "docs/flasher/index.html"), 20 * KB],
-  [join(repoRoot, "docs/optimizer/index.html"), 15 * KB],
-  [join(repoRoot, "docs/shared/design.css"), 12 * KB],
-  [join(repoRoot, "docs/shared/fonts.css"), 3 * KB],
+  [join(repoRoot, "site/index.html"), 30 * KB],
+  [join(repoRoot, "site/flasher/index.html"), 20 * KB],
+  [join(repoRoot, "site/optimizer/index.html"), 15 * KB],
+  [join(repoRoot, "site/shared/design.css"), 12 * KB],
+  [join(repoRoot, "site/shared/fonts.css"), 3 * KB],
 ];
 
 let failed = 0;

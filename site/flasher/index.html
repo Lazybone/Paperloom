@@ -15,7 +15,7 @@
     - connect-src includes the GitHub release hosts because manifest.json
       points at https://github.com/.../releases/latest/download/Paperloom-merged.bin,
       which redirects to objects.githubusercontent.com / github-releases.githubusercontent.com.
-      Verified against docs/flasher/manifest.json and src/ota_update.cpp:22-24.
+      Verified against site/flasher/manifest.json and src/ota_update.cpp:22-24.
     - worker-src includes blob: because esp-web-tools spawns the flashing worker
       from a blob URL it constructs at runtime.
   -->
@@ -25,7 +25,7 @@
   <link rel="stylesheet" href="../shared/design.css" />
 
   <!--
-    esp-web-tools v10.2.1, vendored under docs/flasher/vendor/esp-web-tools/.
+    esp-web-tools v10.2.1, vendored under site/flasher/vendor/esp-web-tools/.
     Apache-2.0 license at LICENSES/esp-web-tools-LICENSE.txt. Source tarball
     fetched once via `npm pack esp-web-tools@10.2.1`; refresh by replaying the
     same command and re-copying dist/web/*.js into the vendor directory.

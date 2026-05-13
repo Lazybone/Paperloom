@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 /**
- * Copies the freshly-built bundles into ../../docs/optimizer/ so GitHub
+ * Copies the freshly-built bundles into ../../site/optimizer/ so GitHub
  * Pages serves them next to the static HTML shell. We DO commit the
  * outputs — see WP-10 / plan note on pre-built artifacts.
  */
@@ -13,13 +13,13 @@ const root = join(here, "..");
 const repoRoot = join(root, "..", "..");
 
 const FILES = [
-  ["dist/optimizer.js", "docs/optimizer/optimizer.js"],
-  ["dist/optimizer.js.map", "docs/optimizer/optimizer.js.map"],
-  ["dist/image-worker.js", "docs/optimizer/image-worker.js"],
-  ["dist/image-worker.js.map", "docs/optimizer/image-worker.js.map"],
+  ["dist/optimizer.js", "site/optimizer/optimizer.js"],
+  ["dist/optimizer.js.map", "site/optimizer/optimizer.js.map"],
+  ["dist/image-worker.js", "site/optimizer/image-worker.js"],
+  ["dist/image-worker.js.map", "site/optimizer/image-worker.js.map"],
 ];
 
-mkdirSync(join(repoRoot, "docs/optimizer"), { recursive: true });
+mkdirSync(join(repoRoot, "site/optimizer"), { recursive: true });
 
 let copied = 0;
 for (const [src, dst] of FILES) {

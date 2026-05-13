@@ -47,7 +47,7 @@ Source code: [`web/optimizer/`](https://github.com/Lazybone/Paperloom/tree/main/
 ```bash
 cd web/optimizer
 npm install
-npm run build       # esbuild + size-gate + copy to docs/optimizer/
+npm run build       # esbuild + size-gate + copy to site/optimizer/
 npm test            # vitest
 ```
 

@@ -422,14 +422,191 @@
   gap: 1rem;
 }
 .queue:empty { display: none; }
+
+/* ─── File cards (one per dropped EPUB) ─────────────────────────── */
+
+.file-cards:empty { display: none; }
+.file-cards {
+  display: grid;
+  gap: 1rem;
+  margin: 1.5rem 0 2rem;
+}
+
+.file-card {
+  background: var(--surface);
+  border: 1px solid var(--surface-edge);
+  border-radius: var(--radius-card);
+  padding: 1.25rem 1.5rem;
+  box-shadow: var(--shadow-card);
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: start;
+  gap: 1rem;
+  position: relative;
+}
+.file-card .fc-thumb {
+  width: 56px;
+  height: 80px;
+  border-radius: 6px;
+  background: var(--bg-deep);
+  border: 1px solid var(--surface-edge);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+.file-card .fc-thumb svg {
+  width: 24px;
+  height: 24px;
+  stroke: currentColor;
+  fill: none;
+  stroke-width: 1.5;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+.file-card .fc-thumb--has-cover {
+  padding: 0;
+  background: transparent;
+  border-color: transparent;
+}
+.file-card .fc-thumb img {
+  display: block;
+  width: 56px;
+  height: 80px;
+  object-fit: cover;
+  border-radius: 6px;
+  border: 1px solid var(--surface-edge);
+}
+.file-card .fc-body {
+  display: grid;
+  gap: 0.55rem;
+  min-width: 0;
+}
+.file-card .fc-name {
+  font-weight: 600;
+  color: var(--ink);
+  font-size: 0.97rem;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.file-card .fc-meta {
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  font-feature-settings: "tnum";
+}
+.file-card .fc-inputs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+  margin-top: 0.25rem;
+}
+@media (max-width: 640px) {
+  .file-card .fc-inputs { grid-template-columns: 1fr; }
+}
+.file-card .fc-inputs input {
+  font: inherit;
+  font-size: 0.9rem;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--surface-edge);
+  border-radius: 7px;
+  background: var(--bg);
+  color: var(--ink);
+  min-width: 0;
+}
+.file-card .fc-inputs input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 3px oklch(from var(--accent) l c h / 0.18);
+}
+.file-card .fc-remove {
+  border: 1px solid transparent;
+  background: transparent;
+  color: var(--ink-soft);
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  cursor: pointer;
+  font-size: 1.2rem;
+  line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background var(--duration-fast) var(--ease),
+              color var(--duration-fast) var(--ease);
+}
+.file-card .fc-remove:hover {
+  background: var(--bg-deep);
+  color: var(--ink);
+}
+.file-card .fc-remove:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 2px;
+}
+
+/* ─── Processing section + CTA spinner ──────────────────────────── */
+
+.processing[hidden] { display: none; }
+.processing {
+  margin: 2rem 0 0.75rem;
+}
+.processing .section-title {
+  font-size: 1.4rem;
+  margin: 0 0 0.5rem;
+}
+
+.cta-icon-spinner { display: none; }
+.primary-cta[data-state="running"] .cta-icon-upload { display: none; }
+.primary-cta[data-state="running"] .cta-icon-spinner {
+  display: inline-block;
+  animation: cta-spin 800ms linear infinite;
+  stroke-dasharray: 14 50;
+}
+@keyframes cta-spin {
+  to { transform: rotate(360deg); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .primary-cta[data-state="running"] .cta-icon-spinner { animation: none; }
+}
 .queue li {
   background: var(--surface);
   border: 1px solid var(--surface-edge);
   border-radius: var(--radius-card);
   padding: 1.25rem 1.5rem;
   display: grid;
-  gap: 0.5rem;
+  gap: 0.6rem;
   box-shadow: var(--shadow-card);
+}
+.queue li[data-state="done"] {
+  border-color: var(--accent);
+}
+
+.queue .qi-download {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  align-self: start;
+  margin-top: 0.4rem;
+  padding: 0.55rem 1.1rem;
+  border-radius: var(--radius-pill);
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-weight: 600;
+  font-size: 0.9rem;
+  text-decoration: none;
+  transition: transform var(--duration-fast) var(--ease),
+              background var(--duration-fast) var(--ease);
+}
+.queue .qi-download::before {
+  content: "↓";
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 300;
+}
+.queue .qi-download:hover {
+  transform: translateY(-1px);
+  background: var(--accent-hover);
 }
 .queue .qi-title {
   font-family: var(--font-display);
@@ -443,21 +620,61 @@
   color: var(--ink-muted);
   font-size: 0.9rem;
   font-feature-settings: "tnum";
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
 }
 .queue .qi-status[data-state="error"] { color: oklch(56% 0.18 30); }
-.queue .qi-status[data-state="done"]  { color: var(--accent); }
+.queue .qi-status[data-state="done"]  { color: var(--accent); font-weight: 600; }
+.queue .qi-status[data-state="running"] { color: var(--accent); }
+.queue .qi-pct {
+  font-variant-numeric: tabular-nums;
+  font-weight: 600;
+  color: var(--accent);
+}
 .queue .qi-bar {
-  height: 4px;
-  border-radius: 2px;
+  height: 10px;
+  border-radius: 5px;
   background: var(--bg-deep);
   overflow: hidden;
+  border: 1px solid var(--surface-edge);
+  position: relative;
 }
+.queue li[data-state="pending"] .qi-bar { opacity: 0.4; }
+.queue li[data-state="done"] .qi-bar > span { background: var(--accent); }
+.queue li[data-state="error"] .qi-bar > span { background: oklch(56% 0.18 30); }
 .queue .qi-bar > span {
   display: block;
   height: 100%;
   width: 0%;
   background: var(--accent);
-  transition: width 200ms var(--ease);
+  transition: width 220ms var(--ease);
+  position: relative;
+}
+/* Animated stripes during the running state — pure CSS, no JS, no
+ * inline-style violations. */
+.queue li[data-state="running"] .qi-bar > span {
+  background-image: linear-gradient(
+    -45deg,
+    var(--accent) 25%,
+    var(--accent-hover) 25%,
+    var(--accent-hover) 50%,
+    var(--accent) 50%,
+    var(--accent) 75%,
+    var(--accent-hover) 75%
+  );
+  background-size: 28px 28px;
+  animation: qi-stripes 900ms linear infinite;
+}
+@keyframes qi-stripes {
+  from { background-position: 0 0; }
+  to   { background-position: 28px 0; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .queue li[data-state="running"] .qi-bar > span {
+    animation: none;
+  }
 }
 
 /* ─── Progress / downloads ───────────────────────────────────────── */
@@ -471,6 +688,10 @@
   gap: 0.75rem;
   margin-bottom: 2rem;
 }
+/* Note: the legacy top-mounted `.downloads--top` block is no longer
+ * rendered by the optimizer page. Per-file download buttons live inline
+ * inside their queue item as `.qi-download`. The CSS rule above stays for
+ * graceful fallback if a stale HTML snapshot still references the block. */
 .downloads a {
   display: inline-flex;
   align-items: center;

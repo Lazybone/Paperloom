@@ -75,7 +75,7 @@ pio run -t upload
 
 ### Optional: pre-optimize books before uploading
 
-The same hub at **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** has a second tool: **EPUB optimizer**. Drop one or more EPUBs in your browser; it quantises images to the 16-gray palette the e-paper display can actually show, strips embedded fonts and unused CSS, repairs the table of contents, and hands back a smaller, sharper EPUB. Everything runs in the browser tab — books never leave your machine. Then drag the optimised file onto the WiFi uploader in step 4. See [`docs/optimizer/README.md`](docs/optimizer/README.md) for the full pipeline.
+The same hub at **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** has a second tool: **EPUB optimizer**. Drop one or more EPUBs in your browser; it quantises images to the 16-gray palette the e-paper display can actually show, strips embedded fonts and unused CSS, repairs the table of contents, and hands back a smaller, sharper EPUB. Everything runs in the browser tab — books never leave your machine. Then drag the optimised file onto the WiFi uploader in step 4. See [`site/optimizer/README.md`](site/optimizer/README.md) for the full pipeline.
 
 ---
 
