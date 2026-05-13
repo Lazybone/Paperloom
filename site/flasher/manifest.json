@@ -1,6 +1,6 @@
 {
   "name": "Paperloom",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "home_assistant_domain": "paperloom",
   "new_install_prompt_erase": false,
   "builds": [

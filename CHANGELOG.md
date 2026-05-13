@@ -4,6 +4,29 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+## v0.2.4 — 2026-05-13
+
+### Added
+- **Sleep entry in the reader menu**: open the reader menu (tap centre)
+  and the new bottom entry "Sleep" puts the device into deep sleep —
+  the same code path as the side button's hold-to-sleep gesture.
+  Resume on wake reopens the same book at the same page.
+
+### Fixed
+- Wake-from-sleep no longer falls back to the library when the device
+  was last on a KoSync screen. The wake-time `kMaxKnownState` guard was
+  pinned to `STATE_WIFI_KEYBOARD`, so any AppState added after that
+  point (`STATE_KOSYNC_SETUP`, `STATE_SYNC_CONFLICT`,
+  `STATE_KOSYNC_PIN_PROMPT`) was silently rejected as "invalid
+  savedState" on wake. Now points to the actual last persistable state,
+  and a file-scope `static_assert` catches future drift at build time.
+- Reader menu no longer renders the "Tap outside to resume" hint and
+  "This page is bookmarked" notice when the menu fills the screen
+  (e.g. when navigation history adds a Back row, making 9 entries
+  total). They previously overlapped the bottom menu items visually
+  and the hint touch zone collided with the last row, so tapping the
+  hint to resume could trigger the row beneath instead.
+
 ## v0.2.3 — 2026-05-13
 
 ### Fixed
