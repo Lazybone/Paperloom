@@ -83,7 +83,7 @@ static void drawLibraryHeader(const char* title, bool showBattery = true) {
     int sortW = display_text_width(sortStr);
     int sortX = (W - sortW) / 2;
     if (sortX > MARGIN_X + 120) {
-        display_draw_text(sortX, HEADER_HEIGHT - 18, sortStr, 6);
+        display_draw_text(sortX, HEADER_HEIGHT - 18, sortStr, 0);
     }
 
     if (showBattery && settings_get().showBattery) {
