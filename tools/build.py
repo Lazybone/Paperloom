@@ -34,6 +34,10 @@ CONFIG_H = REPO_ROOT / "include" / "config.h"
 README = REPO_ROOT / "README.md"
 BUILD_DIR = REPO_ROOT / "build"
 MANIFEST = REPO_ROOT / "site" / "flasher" / "manifest.json"
+# Self-hosted merged image consumed by the Pages flasher (same-origin so
+# esp-web-install-button can fetch without CORS issues — release-asset
+# CDN doesn't ship CORS headers).
+SITE_FIRMWARE = REPO_ROOT / "site" / "flasher" / "firmware" / "Paperloom-merged.bin"
 SITE_MASTHEADS = (
     REPO_ROOT / "site" / "index.html",
     REPO_ROOT / "site" / "flasher" / "index.html",
