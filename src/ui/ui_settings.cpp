@@ -268,12 +268,10 @@ void ui_settings_draw(bool& settingsFromLibrary) {
 
         drawBottomBar("[ Cancel ]");
         // Picker overlay shares the full-screen redraw policy of the rest
-        // of the settings surface. Route through the intent API so the
-        // display layer's anti-ghost counter and zone tracking stay
-        // consistent — see the comment above the main draw flush below
-        // for the GL16-vs-GC16 trade-off.
+        // of the settings surface. See main draw flush below for why
+        // WakeFull (GC16 full) is required instead of StructuralRedraw.
         display_begin_frame();
-        display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+        display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
         display_flush();
         settingsFromLibrary = false;
         return;
@@ -447,20 +445,16 @@ void ui_settings_draw(bool& settingsFromLibrary) {
     // partials are out of scope here — the screen is treated as one big
     // surface.
     //
-    // Previously this routed through display_update_medium() which the
-    // legacy shim mapped to ChangeKind::WakeFull (GC16 full + 6-cycle
-    // clear). We now request StructuralRedraw (GL16 non-flashing partial)
-    // so the screen behaves like every other non-reader surface and the
-    // anti-ghost counter is what enforces a periodic clean refresh, not
-    // every single redraw.
-    //
-    // Historical note: partial / region updates produced vertical stripe
-    // ghosts on this panel because most pixels are unchanged whitespace
-    // and the EPD waveform doesn't fully settle them. If those stripes
-    // recur with GL16 in Phase 7 hardware testing, escalate this back to
-    // ChangeKind::WakeFull (matches the old GC16 full-refresh behavior).
+    // ChangeKind::WakeFull (GC16 full + 6-cycle clear) is required, NOT
+    // StructuralRedraw. Hardware verification (Phase 7) showed GL16
+    // partial leaves visible ghosting on header text ("Settings: Reading"
+    // bleeds through to "Settings: Library" on tab switch) and washes
+    // out the footer bar. Most pixels in settings are unchanged
+    // whitespace and the EPD waveform doesn't fully settle them under
+    // GL16 — exactly the failure mode predicted by the pre-refactor
+    // Phase-7 risk note. GC16 full clear settles every pixel cleanly.
     display_begin_frame();
-    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
     display_flush();
     settingsFromLibrary = false;
 }
