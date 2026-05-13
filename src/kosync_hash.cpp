@@ -28,20 +28,12 @@ constexpr size_t kChunkSize = 1024;
 // Offsets are step << (i+1) → {0, 2048, 4096, 8192, …, 2^21}.
 constexpr int kIterStart = -1;
 constexpr int kIterEnd = 10;
-
-// RAII guard for the mbedtls MD5 context so every early-return path
-// releases the context cleanly.
-class Md5Guard {
-public:
-    Md5Guard() { mbedtls_md5_init(&ctx_); }
-    ~Md5Guard() { mbedtls_md5_free(&ctx_); }
-    Md5Guard(const Md5Guard&) = delete;
-    Md5Guard& operator=(const Md5Guard&) = delete;
-    mbedtls_md5_context* get() { return &ctx_; }
-
-private:
-    mbedtls_md5_context ctx_;
-};
+// Max bytes we ever buffer: 12 iterations × 1024 B = 12 KiB. We use the
+// one-shot `mbedtls_md5(input, len, output)` rather than the streaming
+// _starts/_update/_finish API because espressif32@6.4.0 declares but does
+// NOT link those wrappers (libmbedcrypto.a ships only `mbedtls_md5`).
+constexpr size_t kMaxBufferedBytes = static_cast<size_t>(kChunkSize) *
+                                     static_cast<size_t>(kIterEnd - kIterStart + 1);
 
 // Format a 16-byte MD5 digest as a 32-char lowercase hex String.
 String digest_to_hex(const uint8_t (&digest)[16]) {
@@ -74,23 +66,17 @@ String kosync_compute_document_hash(const String& epubFilePath) {
         return String();
     }
 
-    Md5Guard md5;
-    // ESP-IDF 5.x (espressif32 6.4.0) ships the modern non-_ret mbedtls API.
-    // The older *_ret variants were removed when the deprecated wrappers were
-    // dropped; the modern variants return void — no status to check.
-    mbedtls_md5_starts(md5.get());
-
-    uint8_t buf[kChunkSize];
+    // Buffer all chunks (≤12 KiB total) then hash once via mbedtls_md5().
+    // espressif32@6.4.0's libmbedcrypto.a only links the one-shot variant;
+    // the _starts/_update/_finish lifecycle wrappers are declared but not
+    // implemented in the prebuilt binary.
+    uint8_t buf[kMaxBufferedBytes];
+    size_t bufLen = 0;
     bool readError = false;
 
-    // Mirror KoReader's util.partialMD5 loop: `for i = -1, 10`.
-    // offset = step << (i+1) → 0, 2K, 4K, 8K, 16K, 32K, …, 2 MiB.
     for (int i = kIterStart; i <= kIterEnd; ++i) {
         const uint64_t offset = static_cast<uint64_t>(kChunkSize) << (i + 1);
-        if (offset >= fileSize) {
-            // Past EOF: stop feeding chunks (KoReader breaks here too).
-            break;
-        }
+        if (offset >= fileSize) break;
 
         if (!f.seek(static_cast<uint32_t>(offset))) {
             Serial.printf("[kosync_hash] seek failed at offset %u\n",
@@ -99,29 +85,26 @@ String kosync_compute_document_hash(const String& epubFilePath) {
             break;
         }
 
-        // Read up to kChunkSize bytes; the final chunk may be short if the
-        // remaining file is smaller than 1024 B.
         const size_t remaining = fileSize - static_cast<size_t>(offset);
         const size_t want = remaining < kChunkSize ? remaining : kChunkSize;
-        const int got = f.read(buf, want);
+        const int got = f.read(buf + bufLen, want);
         if (got <= 0) {
             Serial.printf("[kosync_hash] read failed at offset %u (got=%d)\n",
                           (unsigned)offset, got);
             readError = true;
             break;
         }
-
-        mbedtls_md5_update(md5.get(), buf, static_cast<size_t>(got));
+        bufLen += static_cast<size_t>(got);
     }
 
     f.close();
 
-    if (readError) {
+    if (readError || bufLen == 0) {
         return String();
     }
 
     uint8_t digest[16];
-    mbedtls_md5_finish(md5.get(), digest);
+    mbedtls_md5(buf, bufLen, digest);
 
     return digest_to_hex(digest);
 }

@@ -205,16 +205,13 @@ bool is_valid_password(const String& p) {
 }
 
 // Compute MD5 over the given plaintext and return 32-char lowercase hex.
+// Use mbedtls_md5() one-shot: espressif32@6.4.0's libmbedcrypto.a only
+// links this variant; the _starts/_update/_finish wrappers are declared
+// but not implemented in the prebuilt binary.
 String md5_hex(const String& plaintext) {
-    mbedtls_md5_context ctx;
-    mbedtls_md5_init(&ctx);
-    mbedtls_md5_starts(&ctx);
-    mbedtls_md5_update(&ctx,
-                       reinterpret_cast<const uint8_t*>(plaintext.c_str()),
-                       plaintext.length());
     uint8_t digest[16];
-    mbedtls_md5_finish(&ctx, digest);
-    mbedtls_md5_free(&ctx);
+    mbedtls_md5(reinterpret_cast<const uint8_t*>(plaintext.c_str()),
+                plaintext.length(), digest);
 
     char buf[kMd5HexLen + 1];
     for (int i = 0; i < 16; ++i) {
