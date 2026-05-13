@@ -115,11 +115,17 @@ static const int FONT_H = 50;  // UI font height — medium reader font advance_
 static const int BOOK_ITEM_H = FONT_H * 2 + 12;  // title + info + padding
 
 
-static void showWakeFeedback() {
+// Wake banner — partial-update strip that overlays the sleep image with a
+// "Waking..." message for immediate user feedback. Currently unused: WP-6 of
+// the partial-update refactor disabled the call because partials before the
+// first GC16 full are unsafe (epd_hl_init resets back_fb to white while the
+// panel still holds the latched sleep image; the diff is then wrong).
+// Kept here for potential future use (e.g. behind a forced-full preamble) and
+// marked maybe_unused so it doesn't trip -Wunused-function in strict builds.
+[[maybe_unused]] static void showWakeFeedback() {
     const int bannerH = 110;
     const int y = H - bannerH;
 
-    // Wake banner overlays the sleep image after the user presses a key.
     // Chrome text always renders in the UI font (Inter), regardless of
     // whichever reader font was last selected before sleep.
     display_set_font_size(2);
@@ -777,7 +783,20 @@ void setup() {
 
 
     if (wakingFromSleep) {
-        showWakeFeedback();
+        // Intentionally skip showWakeFeedback() here. The banner used to
+        // partial-update a strip over the sleep image as immediate feedback,
+        // but partials are unsafe before the first full refresh after wake:
+        // epdiy's epd_hl_init re-initializes hl_state.back_fb to all-white
+        // while the panel still holds the latched sleep image. Any diff-based
+        // update (display_update_reader_body / _fast) is computed against the
+        // wrong baseline, producing wrong intermediate gray states and silent
+        // corruption on the next periodic anti-ghost refresh.
+        //
+        // The reader/library wake path below already triggers a full GC16
+        // refresh (forceFullRefresh=true for reader, display_force_full_refresh
+        // for library) — that 6-cycle clear *is* the wake visual cue and
+        // cleanly replaces the sleep image without an extra round of flicker.
+        Serial.println("Wake: skip showWakeFeedback (first draw uses GC16 full)");
     }
 
     if (!wakingFromSleep) {
@@ -925,8 +944,14 @@ void setup() {
         }
         debug_trace_mark("wake:post_restore", String((int)appState));
 
-        // Draw the restored screen immediately after the wake banner so the
-        // user gets instant acknowledgement first, then the restored content.
+        // Draw the restored screen. For the reader, readerRefresh.forceFullRefresh
+        // is set above, which routes through display_force_full_refresh() inside
+        // ui_reader_draw() — that re-syncs back_fb with the panel.
+        // For the library there is no per-screen forceFullRefresh flag, so we
+        // must do the resync explicitly here. Without this, the very first
+        // library partial diff would be computed against stale (all-white)
+        // back_fb while the panel still holds the sleep image, leading to the
+        // same silent corruption fixed for the reader path.
         firstLibraryDraw = true;
         needsRedraw = true;
         if (appState == STATE_READER) {
@@ -935,6 +960,10 @@ void setup() {
             debug_trace_mark("wake:after_draw_reader");
         } else {
             debug_trace_mark("wake:before_draw_library");
+            // Resync back_fb to a known white baseline + clear the sleep image
+            // from the panel via a 6-cycle GC16 full refresh, *before* any
+            // partial-update path inside drawLibraryScreen / crash banner runs.
+            display_force_full_refresh();
             drawLibraryScreen();
             debug_trace_mark("wake:after_draw_library");
 
