@@ -25,20 +25,39 @@ int  display_font_ascender();
 int  display_width();
 int  display_height();
 
+// =====================================================================
+// Partial-Update API (intent-based)
+// =====================================================================
+//
+// Lifecycle per frame:
+//   display_begin_frame();
+//   ... draw into the portrait framebuffer ...
+//   display_mark_dirty(Zone::ReaderBody, ChangeKind::TextReflow);
+//   ... optional: display_mark_dirty(...) for additional zones ...
+//   display_flush();   // atomic: one poweron, one update per dirty zone
+//
+// Convention: UI callers describe INTENT (ChangeKind) — the display layer
+// chooses the matching epdiy waveform mode and anti-ghost cadence. UI code
+// must not poke MODE_GC16/MODE_GL16 directly.
+//
+// `needsRedraw` flag in main.cpp is orthogonal: it signals that a draw
+// pass is required. Which zones become dirty is decided by the specific
+// UI draw function via display_mark_dirty().
+//
+// The counter `framesSinceFullRefresh` (tracked internally) is updated
+// exclusively inside display_flush(). When it reaches the
+// REFRESH_INTERVAL_READER threshold from include/config.h, the next flush
+// is auto-escalated to GC16 full refresh and the counter resets.
+//
+// Legacy display_update*() entry points above are now thin wrappers that
+// internally call this API, so existing callers keep working until they
+// migrate to explicit zone+intent in later work packages.
+// =====================================================================
+//
 // ─── Intent-based partial-update API ──────────────────────────────────
 // UI callers declare what kind of change happened; the display layer maps
 // that intent to the right epdiy waveform mode and tracks anti-ghost
 // cadence (forced GC16 every REFRESH_INTERVAL_READER frames).
-//
-// Typical use from a UI frame:
-//     display_begin_frame();
-//     display_mark_dirty(Zone::ReaderBody, ChangeKind::TextReflow);
-//     display_mark_dirty(Zone::ReaderHeader, ChangeKind::GlyphTick);
-//     display_flush();
-//
-// Legacy display_update*() entry points above are now thin wrappers that
-// internally call the new API, so existing callers keep working until they
-// migrate to explicit zone+intent in later work packages.
 enum class ChangeKind : uint8_t {
     GlyphTick,         // Battery icon redraw, clock tick    → DU4 (fast 4-grey)
     HighlightToggle,   // Button / row selection             → DU4

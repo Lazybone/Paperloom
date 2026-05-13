@@ -139,17 +139,42 @@ static_assert(PORTRAIT_H == 960,
 
 // Anti-ghost cadence: after this many consecutive partial frames, the next
 // flush is auto-upgraded to a full GC16 refresh (and the counter resets).
-// 6 matches the documented reader page-turn budget — beyond that the panel
-// starts to accumulate visible ghosting on dark text.
-static constexpr int REFRESH_INTERVAL_READER = 6;
+// The threshold itself lives in include/config.h as REFRESH_INTERVAL_READER
+// so it can be tuned without editing display code; 6 matches the documented
+// reader page-turn budget for ED047TC1 + VCOM 2400 mV.
 static int _framesSinceFullRefresh = 0;
 
-// Power batching: when the next backend variant grows a "hold rails warm"
-// mode, display_flush() will skip the epd_be_poweron() ramp if the
-// previous flush poweroff'd less than POWER_HOLD_WINDOW_MS ago. We record
-// _lastPoweroffMs already so the optimization is a one-line change later.
+// Power batching: _lastPoweroffMs is recorded on every flush poweroff so a
+// future backend variant can implement a "hold rails warm" mode and skip
+// the epd_be_poweron() ramp when the previous poweroff was < POWER_HOLD_
+// WINDOW_MS ago.
+//
+// Currently not wired (epd_be_poweroff_all() drops rails fully); reserved
+// for a future backend variant that supports "hold warm" between flushes.
+// See WP-0.2 review notes.
 [[maybe_unused]] static constexpr unsigned long POWER_HOLD_WINDOW_MS = 80;
 static unsigned long _lastPoweroffMs = 0;
+
+// Per-flush verbose logging (one Serial line per dirty zone). Default
+// off to keep the serial log readable on real-device tuning sessions;
+// flip to 1 when characterizing waveform/mode behavior per zone.
+#ifndef DISPLAY_FLUSH_VERBOSE_LOG
+#define DISPLAY_FLUSH_VERBOSE_LOG 0
+#endif
+
+// Human-readable zone name for [FLUSH] log lines. Kept inside the .cpp so
+// the header doesn't grow a debug helper. Index must match the Zone enum.
+[[maybe_unused]] static const char* zone_name(Zone z) {
+    switch (z) {
+        case Zone::ReaderHeader: return "ReaderHeader";
+        case Zone::ReaderBody:   return "ReaderBody";
+        case Zone::ReaderFooter: return "ReaderFooter";
+        case Zone::Overlay:      return "Overlay";
+        case Zone::FullScreen:   return "FullScreen";
+        case Zone::_Count:       return "?";
+    }
+    return "?";
+}
 
 // epdiy EpdDrawMode integer values, hardcoded here because including
 // <epdiy.h> in display.cpp would collide with our extern-C EpdRect
@@ -740,7 +765,11 @@ void display_flush() {
             isFullRefresh = true;
         }
     }
+    // No work to do — skip without logging. Keeps the serial line strictly
+    // one-per-real-flush so it can be used as a hardware-side beat counter.
     if (!anyDirty) return;
+
+    const unsigned long _flush_t0 = millis();
 
     // Anti-ghost auto-upgrade: if this frame would push us at or beyond
     // the threshold, escalate any dirty reader zone (and the FullScreen
@@ -816,6 +845,32 @@ void display_flush() {
 
     epd_be_poweroff_all();
     _lastPoweroffMs = millis();
+
+    // ─── Flush instrumentation ────────────────────────────────────────
+    // One summary line per real flush. The counter logged below is the
+    // pre-update value (how many partials had accumulated entering this
+    // flush) so a "frames_since_full=6 full=1" line means "the 6-frame
+    // anti-ghost backstop just fired".
+    int _flush_dirty = 0;
+    for (int i = 0; i < (int)Zone::_Count; i++) {
+        if (_zones[i].dirty) _flush_dirty++;
+    }
+    const unsigned long _flush_t1 = millis();
+    Serial.printf("[FLUSH] zones=%d full=%d frames_since_full=%d ms=%lu\n",
+                  _flush_dirty,
+                  isFullRefresh ? 1 : 0,
+                  _framesSinceFullRefresh,
+                  _flush_t1 - _flush_t0);
+#if DISPLAY_FLUSH_VERBOSE_LOG
+    for (int i = 0; i < (int)Zone::_Count; i++) {
+        if (!_zones[i].dirty) continue;
+        const ZoneState& z = _zones[i];
+        Serial.printf("  zone=%s mode=%d rect=(%d,%d,%d,%d)\n",
+                      zone_name((Zone)i),
+                      changekind_to_mode(z.intent),
+                      z.x, z.y, z.w, z.h);
+    }
+#endif
 
     // Counter management — update exactly once per frame, at the end.
     if (isFullRefresh) {

@@ -138,3 +138,16 @@ static const uint8_t LINE_SPACING_PCT[LINE_SPACING_LEVEL_COUNT] = {100, 110, 120
 #define LINE_CACHE_DIR "/books/.linecache"
 #define SLEEP_IMAGES_DIR "/sleep"
 #define MAX_BOOKS      100
+
+// ─── Partial Update Tuning ──────────────────────────────────────────
+// Number of partial Reader frames before display layer auto-forces
+// a GC16 full refresh to clear accumulated ghosting. Lower = more
+// frequent full refresh (less ghost, more flicker). Higher = less
+// flicker but more ghost. Typical 6-8 for ED047TC1 + VCOM 2400 mV.
+//
+// Effective interval = min(user_setting refreshEveryPages, REFRESH_INTERVAL_READER).
+// User-Setting in src/settings.cpp; this define acts as a safety
+// backstop when the user configures a very large value.
+#ifndef REFRESH_INTERVAL_READER
+#define REFRESH_INTERVAL_READER 6
+#endif
