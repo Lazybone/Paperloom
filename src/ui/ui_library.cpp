@@ -73,25 +73,27 @@ static void wrapPosterTitle(const String& title, int maxWidth, int maxLines, std
 // the shared drawHeader() does not. Renamed to make the intentional
 // divergence from the shared chrome obvious at the call site.
 static void drawLibraryHeader(const char* title, bool showBattery = true) {
-    display_draw_filled_rect(0, 0, W, HEADER_HEIGHT, 2);
-    display_draw_text(MARGIN_X, HEADER_HEIGHT - 18, title, 15);
+    // White background + black text — matches drawHeader() in main.cpp.
+    // Dark-gray fill ghosted under GL16 partial waveform on tab switches.
+    display_draw_filled_rect(0, 0, W, HEADER_HEIGHT, 15);
+    display_draw_text(MARGIN_X, HEADER_HEIGHT - 18, title, 0);
 
     char sortStr[32];
     snprintf(sortStr, sizeof(sortStr), "Sort: %s", librarySortNames[min((int)settings_get().librarySortOrder, 3)]);
     int sortW = display_text_width(sortStr);
     int sortX = (W - sortW) / 2;
     if (sortX > MARGIN_X + 120) {
-        display_draw_text(sortX, HEADER_HEIGHT - 18, sortStr, 12);
+        display_draw_text(sortX, HEADER_HEIGHT - 18, sortStr, 6);
     }
 
     if (showBattery && settings_get().showBattery) {
         char battStr[16];
         snprintf(battStr, sizeof(battStr), "%d%%", battery_percent());
         int bw = display_text_width(battStr);
-        display_draw_text(W - MARGIN_X - bw, HEADER_HEIGHT - 18, battStr, 15);
+        display_draw_text(W - MARGIN_X - bw, HEADER_HEIGHT - 18, battStr, 0);
     }
 
-    display_draw_hline(0, HEADER_HEIGHT, W, 0);
+    display_draw_hline(0, HEADER_HEIGHT - 1, W, 0);
 }
 
 static void drawPosterNoCoverTile(const BookInfo& book, int x, int y, int w, int h) {
