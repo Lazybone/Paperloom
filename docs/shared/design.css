@@ -1,0 +1,302 @@
+/* ────────────────────────────────────────────────────────────────────
+ * Paperloom shared design system
+ * Paper (light) + Lamplight (dark). Fraunces display + Inter body.
+ * OKLCH palette, warm cream + ink + forest accent.
+ *
+ * Imported by:
+ *   - docs/index.html         (hub)
+ *   - docs/flasher/index.html (relocated web installer)
+ *   - docs/optimizer/index.html (EPUB optimizer shell)
+ *
+ * Page-local CSS (install card, optimizer queue, etc.) stays inline in the
+ * page that owns it. This file holds tokens + primitives only.
+ *
+ * FROZEN after extraction (plan H2 — file owned by WP-0.3). Add new tokens
+ * here; do NOT silently grow page-local rules into this file.
+ * ──────────────────────────────────────────────────────────────────── */
+
+:root {
+  /* Paper (light) palette in OKLCH — warm cream + ink + forest accent. */
+  --bg:            oklch(96% 0.012 85);
+  --bg-deep:       oklch(93% 0.014 85);
+  --surface:       oklch(99% 0.008 85);
+  --surface-edge:  oklch(86% 0.015 80);
+  --ink:           oklch(22% 0.015 60);
+  --ink-muted:     oklch(46% 0.018 60);
+  --ink-soft:      oklch(60% 0.018 60);
+  --accent:        oklch(42% 0.085 155);
+  --accent-hover:  oklch(35% 0.09 155);
+  --accent-ink:    oklch(98% 0.015 85);
+  --rule:          oklch(82% 0.018 80);
+  --highlight:     oklch(94% 0.06 95);
+
+  --radius-card: 18px;
+  --radius-pill: 999px;
+  --shadow-card: 0 1px 0 oklch(80% 0.02 80 / 0.6), 0 18px 40px -28px oklch(30% 0.05 60 / 0.18);
+
+  --font-display: "Fraunces", Georgia, "Iowan Old Style", serif;
+  --font-body: "Inter", -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+
+  --measure-prose: 38rem;
+  --measure-wide: 56rem;
+
+  --duration-fast: 150ms;
+  --duration-base: 220ms;
+  --ease: cubic-bezier(0.2, 0.7, 0.2, 1);
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    /* Lamplight (dark) palette — warm dark + cream + luminous green. */
+    --bg:           oklch(18% 0.012 70);
+    --bg-deep:      oklch(15% 0.012 70);
+    --surface:      oklch(22% 0.013 70);
+    --surface-edge: oklch(30% 0.014 70);
+    --ink:          oklch(94% 0.015 85);
+    --ink-muted:    oklch(72% 0.018 80);
+    --ink-soft:     oklch(56% 0.018 75);
+    --accent:       oklch(78% 0.12 150);
+    --accent-hover: oklch(86% 0.13 150);
+    --accent-ink:   oklch(18% 0.012 70);
+    --rule:         oklch(32% 0.015 70);
+    --highlight:    oklch(28% 0.04 85);
+    --shadow-card:  0 1px 0 oklch(32% 0.015 70), 0 20px 40px -28px oklch(8% 0.01 70 / 0.6);
+  }
+}
+
+*,
+*::before,
+*::after { box-sizing: border-box; }
+
+html { scroll-behavior: smooth; }
+
+body {
+  margin: 0;
+  font-family: var(--font-body);
+  font-size: 17px;
+  line-height: 1.6;
+  color: var(--ink);
+  background: var(--bg);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  min-height: 100dvh;
+  display: flex;
+  flex-direction: column;
+  /* Faint warm-paper grain — pure SVG, no external request. */
+  background-image:
+    radial-gradient(at 100% 0%, oklch(92% 0.04 80 / 0.55), transparent 55%),
+    radial-gradient(at 0% 100%, oklch(91% 0.05 110 / 0.35), transparent 60%),
+    url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0.04 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  background-attachment: fixed;
+}
+
+@media (prefers-color-scheme: dark) {
+  body {
+    background-image:
+      radial-gradient(at 100% 0%, oklch(28% 0.03 60 / 0.6), transparent 55%),
+      radial-gradient(at 0% 100%, oklch(25% 0.04 130 / 0.4), transparent 60%),
+      url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 200 200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0.05 0'/></filter><rect width='100%25' height='100%25' filter='url(%23n)'/></svg>");
+  }
+}
+
+a {
+  color: var(--accent);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 3px;
+  transition: color var(--duration-fast) var(--ease);
+}
+a:hover { color: var(--accent-hover); }
+
+a:focus-visible,
+button:focus-visible,
+[tabindex]:focus-visible {
+  outline: 3px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 4px;
+}
+
+/* ─── Layout shell ────────────────────────────────────────────────── */
+
+.shell {
+  max-width: var(--measure-wide);
+  margin: 0 auto;
+  padding: clamp(2.5rem, 4vw + 1rem, 5rem) clamp(1.25rem, 2vw + 0.75rem, 2.5rem) 0;
+  flex: 1;
+  width: 100%;
+}
+
+/* ─── Masthead ────────────────────────────────────────────────────── */
+
+.masthead {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding-bottom: 2.5rem;
+  border-bottom: 1px solid var(--rule);
+  margin-bottom: clamp(3rem, 7vh, 5rem);
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 0.65rem;
+  font-family: var(--font-display);
+  font-weight: 500;
+  font-variation-settings: "opsz" 18, "SOFT" 50;
+  font-size: 1.05rem;
+  letter-spacing: 0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+.brand:hover { color: var(--ink); }
+
+.brand-mark {
+  width: 26px;
+  height: 26px;
+  color: var(--accent);
+  flex-shrink: 0;
+}
+
+.masthead-meta {
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  font-feature-settings: "tnum";
+}
+.masthead-meta strong {
+  color: var(--ink);
+  font-weight: 500;
+}
+
+.back-link {
+  font-size: 0.85rem;
+  color: var(--ink-muted);
+  text-decoration: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.back-link:hover { color: var(--accent); }
+.back-link::before {
+  content: "←";
+  font-family: var(--font-display);
+  font-style: italic;
+  color: var(--accent);
+}
+
+/* ─── Hero ────────────────────────────────────────────────────────── */
+
+.hero {
+  max-width: var(--measure-prose);
+  margin-bottom: clamp(3rem, 7vh, 5rem);
+}
+
+.eyebrow {
+  display: inline-block;
+  font-size: 0.78rem;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  font-weight: 500;
+  color: var(--accent);
+  padding-bottom: 1.25rem;
+  position: relative;
+}
+.eyebrow::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  bottom: 0.6rem;
+  width: 2.5rem;
+  height: 1px;
+  background: var(--accent);
+}
+
+.hero h1 {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-variation-settings: "opsz" 144, "SOFT" 30;
+  font-size: clamp(2.8rem, 5.5vw + 1rem, 5rem);
+  line-height: 1.02;
+  letter-spacing: -0.02em;
+  margin: 0.5rem 0 1.5rem;
+  color: var(--ink);
+}
+.hero h1 em {
+  font-style: italic;
+  font-weight: 300;
+  font-variation-settings: "opsz" 144, "SOFT" 100;
+  color: var(--accent);
+}
+
+.hero p {
+  font-size: clamp(1.05rem, 0.5vw + 0.95rem, 1.2rem);
+  color: var(--ink-muted);
+  max-width: 32rem;
+  margin: 0;
+}
+
+/* ─── Section primitives ──────────────────────────────────────────── */
+
+section.spread {
+  padding: clamp(2.5rem, 5vh, 4rem) 0;
+  border-top: 1px solid var(--rule);
+}
+
+.section-title {
+  font-family: var(--font-display);
+  font-weight: 400;
+  font-variation-settings: "opsz" 48;
+  font-size: clamp(1.6rem, 1.5vw + 1rem, 2.1rem);
+  line-height: 1.15;
+  letter-spacing: -0.01em;
+  margin: 0 0 0.4rem;
+  color: var(--ink);
+}
+.section-title em {
+  font-style: italic;
+  color: var(--accent);
+  font-weight: 300;
+}
+.section-lede {
+  color: var(--ink-muted);
+  font-size: 1rem;
+  max-width: var(--measure-prose);
+  margin: 0 0 clamp(2rem, 4vh, 2.75rem);
+}
+
+/* ─── Footer ──────────────────────────────────────────────────────── */
+
+footer {
+  margin-top: clamp(3rem, 6vh, 5rem);
+  padding: 2rem clamp(1.25rem, 2vw + 0.75rem, 2.5rem);
+  border-top: 1px solid var(--rule);
+  background: transparent;
+}
+.footer-row {
+  max-width: var(--measure-wide);
+  margin: 0 auto;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  font-size: 0.86rem;
+  color: var(--ink-muted);
+}
+.footer-row .colophon {
+  font-family: var(--font-display);
+  font-style: italic;
+  font-weight: 400;
+  font-variation-settings: "opsz" 18;
+}
+
+/* ─── Reduced motion ──────────────────────────────────────────────── */
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}

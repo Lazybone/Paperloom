@@ -1,0 +1,14 @@
+/* Paperloom shared font loader.
+ *
+ * Google Fonts CSS varies by User-Agent (different woff2 URLs and unicode-range
+ * blocks per browser), so SRI on the stylesheet itself is not feasible. The
+ * trade-off — relying on Google's CDN integrity — is acceptable for v0.3.0.
+ * Self-hosting Fraunces + Inter as woff2 files is tracked as a v0.4.0
+ * follow-up; see plan.md MED-16 and the SRI note in WP-0.3.
+ *
+ * Consumers: add the matching <link rel="preconnect"> tags themselves so they
+ * appear before the stylesheet link in <head> (CSS @import skips the preconnect
+ * opportunity).
+ */
+
+@import url("https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght,SOFT@9..144,300..700,30..100&family=Inter:wght@400;500;600&display=swap");

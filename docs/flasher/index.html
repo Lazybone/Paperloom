@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Paperloom — Firmware Installer</title>
+  <meta name="description" content="Install Paperloom firmware on your LilyGo T5 E-Paper S3 Pro from your browser. No drivers, no command line." />
+  <meta name="theme-color" content="#f4ede0" media="(prefers-color-scheme: light)" />
+  <meta name="theme-color" content="#1a1714" media="(prefers-color-scheme: dark)" />
+
+  <!--
+    Content-Security-Policy notes:
+    - script-src includes unpkg.com because esp-web-install-button is loaded from
+      that CDN and pulls additional chunks (install-dialog, esptool-js worker
+      runtime) at flash time.
+    - connect-src includes the GitHub release hosts because manifest.json
+      points at https://github.com/.../releases/latest/download/Paperloom-merged.bin,
+      which redirects to objects.githubusercontent.com / github-releases.githubusercontent.com.
+      Verified against docs/manifest.json and src/ota_update.cpp:22-24.
+    - worker-src includes blob: because esp-web-tools spawns the flashing worker
+      from a blob URL it constructs at runtime.
+  -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self' https://unpkg.com; style-src 'self' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; img-src 'self' data: blob:; connect-src 'self' https://unpkg.com https://github.com https://objects.githubusercontent.com https://github-releases.githubusercontent.com; worker-src 'self' blob:; frame-src 'none'; object-src 'none'; media-src 'none'; form-action 'none'; base-uri 'self';" />
+
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="../shared/fonts.css" />
+  <link rel="stylesheet" href="../shared/design.css" />
+
+  <!--
+    esp-web-tools v10.2.1, pinned by exact version + SRI on the entry module.
+    The entry uses dynamic imports for child chunks, which cannot be hash-pinned
+    here; the chunks load over the same unpkg origin and are covered by
+    script-src/connect-src. To tighten further, vendor the dist/ directory and
+    serve from same origin — tracked as a v0.4 hardening task.
+  -->
+  <script
+    type="module"
+    src="https://unpkg.com/esp-web-tools@10.2.1/dist/web/install-button.js?module"
+    integrity="sha384-2Ea4WL8tjFb0qQKUqBoX45KlPVoUgL+Z3zUqsD0MHmtJ3faDbfNyZulLg/LfYDUZ"
+    crossorigin="anonymous"
+  ></script>
+
+  <style>
+    /* ─── Flasher-only — install card, steps, FAQ ─────────────────────
+     * Shared tokens live in ../shared/design.css. Page-local rules stay
+     * here so the hub and optimizer don't ship install-card CSS they
+     * never use. */
+
+    .install {
+      background: var(--surface);
+      border: 1px solid var(--surface-edge);
+      border-radius: var(--radius-card);
+      padding: clamp(1.75rem, 2vw + 1rem, 2.75rem);
+      margin-bottom: 3rem;
+      box-shadow: var(--shadow-card);
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 1.75rem;
+      position: relative;
+      overflow: hidden;
+    }
+    .install::before {
+      content: "";
+      position: absolute;
+      inset: 0 auto 0 0;
+      width: 3px;
+      background: linear-gradient(to bottom, var(--accent), transparent 65%);
+      opacity: 0.55;
+    }
+
+    @media (min-width: 720px) {
+      .install {
+        grid-template-columns: 1fr auto;
+        align-items: center;
+        gap: 2.5rem;
+      }
+    }
+
+    .install-copy h2 {
+      font-family: var(--font-display);
+      font-weight: 500;
+      font-variation-settings: "opsz" 36;
+      font-size: 1.6rem;
+      line-height: 1.15;
+      margin: 0 0 0.5rem;
+      color: var(--ink);
+      letter-spacing: -0.01em;
+    }
+    .install-copy p {
+      margin: 0;
+      color: var(--ink-muted);
+      font-size: 0.95rem;
+      max-width: 28rem;
+    }
+
+    .install-cta {
+      display: flex;
+      flex-direction: column;
+      align-items: flex-start;
+      gap: 0.75rem;
+    }
+    @media (min-width: 720px) {
+      .install-cta { align-items: flex-end; }
+    }
+
+    esp-web-install-button {
+      --esp-tools-button-color: var(--accent);
+      --esp-tools-button-text-color: var(--accent-ink);
+      --esp-tools-button-border-color: var(--accent);
+      display: inline-block;
+    }
+    esp-web-install-button::part(button),
+    esp-web-install-button button {
+      font-family: var(--font-body);
+      font-weight: 600;
+      font-size: 1rem;
+      letter-spacing: 0.01em;
+      padding: 0.95rem 1.6rem;
+      border-radius: var(--radius-pill);
+      min-height: 48px;
+      transition: transform var(--duration-fast) var(--ease),
+                  background var(--duration-fast) var(--ease);
+    }
+    esp-web-install-button::part(button):hover,
+    esp-web-install-button button:hover {
+      transform: translateY(-1px);
+    }
+    esp-web-install-button:focus-visible {
+      outline: 3px solid var(--accent);
+      outline-offset: 3px;
+      border-radius: 4px;
+    }
+
+    .slot-message {
+      display: block;
+      font-family: var(--font-body);
+      font-size: 0.9rem;
+      color: var(--ink-muted);
+      max-width: 22rem;
+      line-height: 1.5;
+    }
+    @media (min-width: 720px) {
+      .slot-message { text-align: right; margin-left: auto; }
+    }
+
+    .browser-note {
+      font-size: 0.82rem;
+      color: var(--ink-soft);
+      display: inline-flex;
+      align-items: center;
+      gap: 0.4rem;
+    }
+    .browser-note svg {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      stroke: var(--ink-soft);
+    }
+
+    .steps {
+      list-style: none;
+      margin: 0;
+      padding: 0;
+      display: grid;
+      gap: 1.25rem;
+    }
+    @media (min-width: 760px) {
+      .steps { grid-template-columns: repeat(2, 1fr); gap: 1.5rem; }
+    }
+
+    .step {
+      background: var(--surface);
+      border: 1px solid var(--surface-edge);
+      border-radius: var(--radius-card);
+      padding: 1.5rem 1.5rem 1.4rem;
+      display: grid;
+      grid-template-columns: auto 1fr;
+      column-gap: 1.1rem;
+      align-items: start;
+      box-shadow: var(--shadow-card);
+      transition: transform var(--duration-base) var(--ease);
+    }
+    .step:hover { transform: translateY(-2px); }
+
+    .step-num {
+      font-family: var(--font-display);
+      font-weight: 400;
+      font-style: italic;
+      font-variation-settings: "opsz" 72;
+      font-size: 2.4rem;
+      line-height: 1;
+      color: var(--accent);
+      grid-row: 1 / span 2;
+      align-self: center;
+      min-width: 2ch;
+    }
+
+    .step h3 {
+      font-family: var(--font-body);
+      font-size: 1rem;
+      font-weight: 600;
+      letter-spacing: 0.01em;
+      margin: 0 0 0.25rem;
+      color: var(--ink);
+    }
+    .step p {
+      margin: 0;
+      font-size: 0.93rem;
+      color: var(--ink-muted);
+      line-height: 1.55;
+    }
+    .step kbd {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.82em;
+      padding: 0.1em 0.4em;
+      border-radius: 4px;
+      border: 1px solid var(--rule);
+      background: var(--bg-deep);
+      color: var(--ink);
+    }
+
+    details.faq {
+      border-bottom: 1px solid var(--rule);
+      padding: 1.1rem 0;
+    }
+    details.faq:first-of-type { border-top: 1px solid var(--rule); }
+    details.faq summary {
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 1rem;
+      font-size: 1.02rem;
+      font-weight: 500;
+      color: var(--ink);
+      padding: 0.25rem 0;
+      min-height: 44px;
+    }
+    details.faq summary::-webkit-details-marker { display: none; }
+    details.faq summary::after {
+      content: "+";
+      font-family: var(--font-display);
+      font-weight: 300;
+      font-size: 1.6rem;
+      line-height: 1;
+      color: var(--accent);
+      transition: transform var(--duration-base) var(--ease);
+    }
+    details.faq[open] summary::after {
+      content: "−";
+    }
+    details.faq .faq-body {
+      padding: 0.5rem 0 0.25rem;
+      color: var(--ink-muted);
+      font-size: 0.95rem;
+      max-width: var(--measure-prose);
+    }
+    details.faq code {
+      font-family: ui-monospace, "SF Mono", Menlo, monospace;
+      font-size: 0.85em;
+      background: var(--highlight);
+      padding: 0.12em 0.4em;
+      border-radius: 4px;
+      color: var(--ink);
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      .step:hover { transform: none; }
+    }
+  </style>
+</head>
+<body>
+  <div class="shell">
+    <header class="masthead">
+      <a href="../" class="brand">
+        <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+          <path d="M4 4.5C4 3.7 4.7 3 5.5 3H11v18H5.5C4.7 21 4 20.3 4 19.5V4.5Z" />
+          <path d="M20 4.5C20 3.7 19.3 3 18.5 3H13v18h5.5c.8 0 1.5-.7 1.5-1.5V4.5Z" />
+          <path d="M12 3v18" stroke-dasharray="1 2" />
+        </svg>
+        Paperloom
+      </a>
+      <div class="masthead-meta">
+        <a href="../" class="back-link" aria-label="Back to Paperloom hub">Back to hub</a>
+        <span aria-hidden="true"> · </span>
+        <strong>v0.2.1</strong> · Firmware installer
+      </div>
+    </header>
+
+    <section class="hero" aria-labelledby="hero-heading">
+      <span class="eyebrow">Browser-flashable firmware</span>
+      <h1 id="hero-heading">A reader that lives <em>quietly</em> on your shelf.</h1>
+      <p>Paperloom is a paper-first reader for the LilyGo T5 E-Paper S3 Pro. Plug yours in below — your browser will do the rest. No drivers, no terminal, no PlatformIO.</p>
+    </section>
+
+    <section class="install" aria-labelledby="install-heading">
+      <div class="install-copy">
+        <h2 id="install-heading">Install the latest firmware</h2>
+        <p>Connect your reader over USB-C and click <em>Install</em>. Takes about a minute, end to end.</p>
+      </div>
+      <div class="install-cta">
+        <esp-web-install-button manifest="./manifest.json">
+          <button slot="activate" type="button">Install Paperloom</button>
+          <span slot="unsupported" class="slot-message">
+            This browser doesn't support Web Serial. Open this page in Chrome, Edge, or Opera on Mac, Windows, or Linux to install over USB.
+          </span>
+          <span slot="not-allowed" class="slot-message">
+            Web Serial needs a secure origin. Reload this page over <code>https://</code> and try again.
+          </span>
+        </esp-web-install-button>
+        <span class="browser-note" aria-live="polite">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <circle cx="12" cy="12" r="9" />
+            <path d="M12 8v4M12 16h.01" />
+          </svg>
+          Use Chrome, Edge, or Opera on a desktop computer.
+        </span>
+      </div>
+    </section>
+
+    <section class="spread" aria-labelledby="how-heading">
+      <h2 class="section-title" id="how-heading">How it <em>works</em></h2>
+      <p class="section-lede">Four small steps. After this, your reader updates itself over WiFi — you'll never need this page again.</p>
+
+      <ol class="steps">
+        <li class="step">
+          <span class="step-num" aria-hidden="true">i</span>
+          <div>
+            <h3>Plug in the e-reader</h3>
+            <p>Connect a USB-C cable that supports data (some thin cables only carry power and won't show up on your computer).</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">ii</span>
+          <div>
+            <h3>Open the install dialog</h3>
+            <p>Click <em>Install Paperloom</em> above, then pick the serial port labeled <kbd>USB JTAG/serial debug unit</kbd>.</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">iii</span>
+          <div>
+            <h3>Let it flash</h3>
+            <p>The installer writes the firmware in about 30–60 seconds. The device's screen will stay blank during this — that's normal.</p>
+          </div>
+        </li>
+        <li class="step">
+          <span class="step-num" aria-hidden="true">iv</span>
+          <div>
+            <h3>Press <kbd>RST</kbd> once</h3>
+            <p>The reader boots into Paperloom. From here, future updates arrive over WiFi via <em>Settings → Firmware Update</em>.</p>
+          </div>
+        </li>
+      </ol>
+    </section>
+
+    <section class="spread" aria-labelledby="help-heading">
+      <h2 class="section-title" id="help-heading">If something goes <em>sideways</em></h2>
+      <p class="section-lede">A short list of things to try before you give up. Most installer issues come down to the cable.</p>
+
+      <details class="faq">
+        <summary>The device doesn't show up when I click Connect</summary>
+        <div class="faq-body">
+          <p>Hold the <kbd>BOOT</kbd> button on the device, press <kbd>RST</kbd> once, then release <kbd>BOOT</kbd>. This forces the chip into download mode. Click <em>Install Paperloom</em> again and the port should appear.</p>
+        </div>
+      </details>
+
+      <details class="faq">
+        <summary>"Failed to initialize" or the install stalls</summary>
+        <div class="faq-body">
+          <p>The cable is the most common culprit. Try a different USB-C cable — ideally one that's known to carry data (the cable that came with a phone or laptop is a safer bet than a random charging cable).</p>
+        </div>
+      </details>
+
+      <details class="faq">
+        <summary>I'm on Linux and the port isn't visible</summary>
+        <div class="faq-body">
+          <p>Add your user to the <code>dialout</code> group, then log out and back in:</p>
+          <p><code>sudo usermod -aG dialout $USER</code></p>
+        </div>
+      </details>
+
+      <details class="faq">
+        <summary>I'd rather flash it myself with esptool or PlatformIO</summary>
+        <div class="faq-body">
+          <p>The firmware binaries (<code>firmware.bin</code>, the merged install image, and a friendly download copy) are attached to every <a href="https://github.com/Lazybone/Paperloom/releases">GitHub release</a>. Use whichever tool you prefer.</p>
+        </div>
+      </details>
+    </section>
+  </div>
+
+  <footer>
+    <div class="footer-row">
+      <span class="colophon">Set in Fraunces &amp; Inter. Made with care.</span>
+      <span>Open source · <a href="https://github.com/Lazybone/Paperloom">github.com/Lazybone/Paperloom</a></span>
+    </div>
+  </footer>
+</body>
+</html>
