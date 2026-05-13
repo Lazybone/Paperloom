@@ -1,0 +1,18 @@
+{
+  "iteration": 0,
+  "review_sha": null,
+  "reviewer_fsm": {
+    "logic": "ACTIVE",
+    "security": "ACTIVE",
+    "quality": "ACTIVE",
+    "architecture": "ACTIVE"
+  },
+  "stuck_findings": {},
+  "previous_findings": [],
+  "hardening_done": false,
+  "off_budget_critical_runs": 0,
+  "branch": "auto-dev/partial-update-refactor-20260513-152859",
+  "start_commit": "a8c759e252f825f1c6ef804e04834caa21c77fa0",
+  "base_branch": "main",
+  "task": "Partial-Update-Refactor laut docs/partial_updates_plan.md"
+}
