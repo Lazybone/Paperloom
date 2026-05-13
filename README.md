@@ -195,10 +195,100 @@ You normally never need to touch this — Paperloom creates everything itself. F
 
 ---
 
+## KoReader Sync
+
+Paperloom can sync your reading progress (chapter, page, percentage, timestamp) to a [kosync](https://github.com/koreader/koreader-sync-server) server and pull it back later. By default it talks to the free public server at **`https://kosync.eu`** — but any kosync-compatible server (including self-hosted) works; the server URL is fully configurable.
+
+### What it gives you
+
+- Pick up the same book on a second Paperloom device at the right page
+- Cross-app handshake with KoReader on phones / Kobo / Kindle (percentage aligns reliably; exact position-jumping works best Paperloom ↔ Paperloom)
+- Manual sync only — never runs in the background, never on page-turn, never on book-open
+
+### Setup
+
+There are two ways to enter your kosync credentials. Pick one — they write to the same place.
+
+#### Option A — Web-UI (recommended)
+
+1. Connect the device to WiFi (Settings → WiFi Setup) if you haven't already.
+2. Open Settings → WiFi Manager. Note the IP address shown.
+3. On a computer or phone on the same network, open `http://<that-ip>/`.
+4. Scroll to the **KoSync** section. Fill in:
+   - **Server URL** — defaults to `https://kosync.eu`; HTTPS-only.
+   - **Username** — kosync account name. Create one with the **Register** button if you don't have one.
+   - **Password** — kosync account password. Stored only as MD5 hash; never as plaintext.
+   - **Device name** _(optional)_ — defaults to `paperloom-<last-4-MAC-lowercase>`. Override only if you run multiple Paperloom devices on the same kosync account.
+5. Click **Save**.
+6. The e-paper will display a **6-digit PIN**. Type it into the browser prompt and click Save again.
+   - The PIN is one-time — every credential write requires a fresh one.
+   - It expires after 60 s. If you miss the window, just submit again; a new PIN appears.
+   - 3 wrong PINs in a row lock the endpoint for 5 minutes (anti-brute-force).
+
+#### Option B — On-device
+
+1. Open the reader menu → **KoSync Setup**.
+2. Step through three on-screen-keyboard prompts: server URL → username → password.
+3. Tap **Save**. Returns to the reader.
+
+On-device setup is not PIN-gated — physical access to the device is treated as trusted.
+
+### Register a new kosync account
+
+If you don't have a kosync account yet, use the **Register** button next to the credential fields in the web-UI. It posts to `<server>/users/create` and reports success or "Benutzername vergeben".
+
+### Triggering a sync
+
+Sync is **always manual** — never automatic. Two ways:
+
+- **Reader menu → "Sync Fortschritt"** — tap the entry once.
+- **Hardware button** — bind the BOOT or side button to the "Sync Fortschritt" action in **Settings → Device**. Then tap / double-tap / hold to fire it.
+
+The menu entry is grayed out while no book is open.
+
+### Conflict resolution
+
+If local progress and the server's progress diverge by more than ~2 pages or 1 %, Paperloom shows a side-by-side dialog with three buttons:
+
+- **Lokal behalten** — push the device's progress to the server.
+- **Remote übernehmen** — overwrite the device's progress with the server's.
+- **Abbrechen** — do nothing.
+
+The dialog must be resolved on the device; the sync does not retry by itself.
+
+### Status messages
+
+| Toast | Meaning |
+|-------|---------|
+| `Sync ok` | Both sides already agree; timestamp refreshed on the server. |
+| `Sync ok (neu)` | First sync for this book — server had no progress yet; pushed local. |
+| `Sync ok (Server aktualisiert)` | Conflict resolved with "Lokal behalten"; server now matches device. |
+| `Sync ok (Lokal aktualisiert)` | Conflict resolved with "Remote übernehmen"; device now matches server. |
+| `Sync teilweise: Lokal aktualisiert, Server fehlgeschlagen` | Remote applied locally, but the follow-up push failed. Try again later. |
+| `Sync ok (Server) — Lokales Speichern fehlgeschlagen` | Server accepted the remote, but the SD card write failed. |
+| `Sync fehlgeschlagen: Kein WLAN` | WiFi is off. Reconnect, then re-trigger. |
+| `Sync fehlgeschlagen: Server nicht erreichbar` | DNS / connect / TLS timeout. Check server URL. |
+| `Sync fehlgeschlagen: Login ungültig` | 401 / 403 from the server — re-enter credentials. |
+| `Sync fehlgeschlagen: Serverfehler` | 5xx or malformed response. Try again later. |
+| `Sync abgebrochen` | You picked "Abbrechen" in the conflict dialog. |
+| `KoSync nicht konfiguriert` | Credentials empty or invalid. Open KoSync Setup (on-device) or the web-UI KoSync section to fix. |
+
+### Things to know
+
+- **MD5 caveat.** The kosync protocol mandates MD5 of the password as the auth key. MD5 is **not** a strong password hash. Pick a unique kosync password — don't reuse one from another account. Rotate it every few months.
+- **Cross-app sync is approximate.** Paperloom emits its own `progress` encoding. Paperloom ↔ Paperloom round-trips losslessly. Paperloom ↔ stock KoReader aligns reliably on the **percentage** field; exact position-jumping requires same-app sync.
+- **WiFi must be up before you trigger.** Paperloom does not auto-reconnect for sync.
+- **LAN read-side trust boundary.** `GET /api/kosync-settings` returns server URL, username, and device name to anyone on your WiFi. The password hash is never returned. Treat your home network as trusted; don't enable WiFi Manager on public hotspots.
+- **PIN observers.** The 6-digit PIN shown during web-UI setup is visible to anyone glancing at the device for the 60 s window. Single-use semantics prevent later reuse, but the same-room threat is the documented trust boundary.
+- **Multiple devices.** If you run more than one Paperloom on the same kosync account, override the device name in setup so they don't collide on the default `paperloom-<mac4>`.
+
+---
+
 ## More documentation
 
 - [`DESIGN.md`](DESIGN.md) — UI conventions, screen layouts
 - [`CHANGELOG.md`](CHANGELOG.md) — what changed in each version
+- [`docs/kosync.md`](docs/kosync.md) — KoSync architecture, algorithm verification, threat model (for maintainers)
 - [`include/config.h.example`](include/config.h.example) — compile-time options for developers
 
 ---

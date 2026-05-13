@@ -7,7 +7,11 @@ compile_commands.json
 
 # ─── User-specific config (contains WiFi credentials) ───────────────
 include/config.h
-docs/
+# Local maintainer scratch notes live under docs/; do NOT track them by
+# default. Exception: docs/kosync.md is part of the shipped repo
+# (linked from README.md) and is explicitly opted-in.
+docs/*
+!docs/kosync.md
 
 # ─── Compiled binaries ───────────────────────────────────────────────
 *.bin
