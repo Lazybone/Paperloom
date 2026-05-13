@@ -422,12 +422,28 @@ void ui_library_draw(
         cover_precache_page(books, filteredIndices, scroll, cardsPerPage);
     }
 
+    // WP-3: route through intent-based API instead of the legacy shims.
+    // The library grid is a single full-screen surface — there is no
+    // header/body/footer zoning here like in the reader, so we always
+    // mark Zone::FullScreen. The intent (WakeFull vs StructuralRedraw)
+    // chooses the waveform:
+    //   - firstDraw (first paint after entering library / after wake):
+    //       WakeFull -> GC16 6-cycle clear so any sleep image / boot
+    //       artifact / leftover splash is replaced cleanly.
+    //   - Subsequent draws (filter-tab switch, scroll/page, sort cycle,
+    //       tile tap returning to library): StructuralRedraw -> GL16
+    //       1-cycle partial. Same draw code, ~3x faster, no flicker.
+    // Touch handlers don't redraw selectively (the library does not have
+    // a lightweight highlight-only path), so all post-touch repaints
+    // funnel through this single flush.
+    display_begin_frame();
     if (firstDraw) {
         firstDraw = false;
-        display_update();  // initial boot draw needs full clean from sleep/boot state
+        display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
     } else {
-        display_update_medium();
+        display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
     }
+    display_flush();
 }
 
 AppState ui_library_touch(
