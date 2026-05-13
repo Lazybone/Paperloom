@@ -4,6 +4,8 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+## v0.2.3 — 2026-05-13
+
 ### Fixed
 - Web flasher: fix the post-install **Logs** panel collapsing every line
   onto a single paragraph with the wrong colour scheme. esp-web-tools
