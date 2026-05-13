@@ -15,13 +15,17 @@ static size_t _downloadSize = 0;
 
 // ─── Allow-list & secure-client helpers ────────────────────────────
 
-// GitHub release downloads land on either github.com (the redirect entry)
-// or *.githubusercontent.com (the actual S3-backed object). Reject any
-// other host so a compromised API response can't redirect us elsewhere.
+// GitHub release downloads land on github.com (the redirect entry) and
+// then bounce through one of three Azure-backed asset hosts. As of
+// 2026-05 release-assets.githubusercontent.com is the new front; the
+// other two are kept for backwards-compat with older releases that
+// haven't been re-uploaded. Reject any other host so a compromised API
+// response can't redirect us elsewhere.
 static bool isAllowedDownloadUrl(const String& url) {
     return url.startsWith("https://github.com/") ||
            url.startsWith("https://objects.githubusercontent.com/") ||
-           url.startsWith("https://github-releases.githubusercontent.com/");
+           url.startsWith("https://github-releases.githubusercontent.com/") ||
+           url.startsWith("https://release-assets.githubusercontent.com/");
 }
 
 // GitHub TLS trust anchors. As of 2026-05 GitHub serves at least two
