@@ -5,6 +5,11 @@
 #include "../inline_image.h"
 #include "../debug_trace.h"
 #include "../reader.h"
+#include "../kosync_sync.h"
+#include "../kosync_pin_state.h"
+#include "ui_toast.h"
+#include "ui_reader_kosync_setup.h"
+#include "ui_reader_sync_conflict.h"
 #include "config.h"
 
 // ─── Layout constants (matching main.cpp) ───────────────────────────
@@ -586,6 +591,17 @@ void ui_reader_menu_draw(BookReader& reader) {
     display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
     y += MENU_ITEM_H;
 
+    // WP-7: KoSync entries — placed next to Bookmarks so users can sync
+    // before continuing to read, and open the credential setup from the
+    // same menu without leaving the reader context.
+    display_draw_text(indent, y, "Sync Fortschritt", 0);
+    display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
+    y += MENU_ITEM_H;
+
+    display_draw_text(indent, y, "KoSync Setup", 0);
+    display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
+    y += MENU_ITEM_H;
+
     display_draw_text(indent, y, "Settings", 0);
     display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
     y += MENU_ITEM_H;
@@ -616,7 +632,10 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
     // Shift touch zone up so it aligns with what the user sees.
     int zoneTop = MENU_START_Y + 40 - FONT_H;
     int row = (y - zoneTop) / MENU_ITEM_H;
-    int rowCount = reader.hasNavigationHistory() ? 6 : 5;
+    // Row count = base entries (Go to, TOC, Bookmarks, Sync Fortschritt,
+    // KoSync Setup, Settings, Library = 7) + optional Back row when the
+    // reader has navigation history. Keep in sync with ui_reader_menu_draw.
+    int rowCount = reader.hasNavigationHistory() ? 8 : 7;
 
     if (y >= zoneTop && y < zoneTop + MENU_ITEM_H * rowCount) {
         refresh.fastRefresh = false;
@@ -649,10 +668,43 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
             case 2: // Bookmarks
                 setNeedsRedraw(true);
                 return STATE_BOOKMARKS;
-            case 3: // Settings
+            case 3: { // Sync Fortschritt — push/pull progress to KoSync server
+                if (!kosync_is_coordinator_initialized()) {
+                    ui_toast_show("Sync error", 2500, true);
+                    setNeedsRedraw(true);
+                    return STATE_MENU;
+                }
+                SyncResult result = kosync_get_coordinator().syncNow();
+                if (result.hasConflict) {
+                    // Coordinator leaves the busy flag set; the conflict
+                    // dialog routes the user's decision back through
+                    // resolveConflict() / clearBusy(). Pass the result in
+                    // so the dialog can render local vs. remote without
+                    // re-querying.
+                    ui_sync_conflict_set_data(result);
+                    s_overlayDismissed = true;
+                    setNeedsRedraw(true);
+                    return STATE_SYNC_CONFLICT;
+                }
+                if (result.toast.length() > 0) {
+                    ui_toast_show(result.toast, 2500, !result.success);
+                }
+                s_overlayDismissed = true;
+                setNeedsRedraw(true);
+                return STATE_READER;
+            }
+            case 4: // KoSync Setup — on-device credential entry
+                // Clear any pending PIN/web-UI gate state so the on-device
+                // setup flow starts from a known baseline (and a stale
+                // web-UI PIN cannot accidentally validate during setup).
+                kosync_pin_reset_state();
+                ui_kosync_setup_enter();
+                setNeedsRedraw(true);
+                return STATE_KOSYNC_SETUP;
+            case 5: // Settings
                 setNeedsRedraw(true);
                 return STATE_SETTINGS;
-            case 4: // Library
+            case 6: // Library
                 reader.saveProgress();
                 reader.closeBook();
                 setNeedsRedraw(true);

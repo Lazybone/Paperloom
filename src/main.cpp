@@ -24,6 +24,12 @@
 #include "ui/ui_update.h"
 #include "ui/ui_keyboard.h"
 #include "ui/ui_wifi_setup.h"
+#include "kosync_sync.h"
+#include "kosync_pin_state.h"
+#include "ui/ui_toast.h"
+#include "ui/ui_reader_kosync_setup.h"
+#include "ui/ui_reader_sync_conflict.h"
+#include "ui/ui_kosync_pin_prompt.h"
 #include <WiFi.h>
 #include <Preferences.h>
 #include <qrcode.h>
@@ -345,6 +351,25 @@ static void drawKeyboardScreen() {
     needsRedraw = false;
 }
 
+// ═══════════════════════════════════════════════════════════════════
+// KoSync screens (delegated)
+// ═══════════════════════════════════════════════════════════════════
+
+static void drawKosyncSetupScreen() {
+    ui_kosync_setup_draw();
+    needsRedraw = false;
+}
+
+static void drawSyncConflictScreen() {
+    ui_sync_conflict_draw();
+    needsRedraw = false;
+}
+
+static void drawKosyncPinPromptScreen() {
+    ui_kosync_pin_prompt_draw();
+    needsRedraw = false;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // Touch handlers
@@ -498,6 +523,30 @@ static void handleKeyboardTouch(int x, int y) {
     AppState newState = ui_keyboard_touch(x, y);
     appState = newState;
     needsRedraw = true;
+}
+
+static void handleKosyncSetupTouch(int x, int y) {
+    AppState newState = ui_kosync_setup_touch(x, y);
+    if (newState != appState) {
+        appState = newState;
+        needsRedraw = true;
+    }
+}
+
+static void handleSyncConflictTouch(int x, int y) {
+    AppState newState = ui_sync_conflict_touch(x, y);
+    if (newState != appState) {
+        appState = newState;
+        needsRedraw = true;
+    }
+}
+
+static void handleKosyncPinPromptTouch(int x, int y) {
+    AppState newState = ui_kosync_pin_prompt_touch(x, y);
+    if (newState != appState) {
+        appState = newState;
+        needsRedraw = true;
+    }
 }
 
 // ═══════════════════════════════════════════════════════════════════
@@ -887,6 +936,11 @@ void setup() {
     wifi_upload_init();
     wifi_upload_set_reader(&reader);
 
+    // KoSync: initialize the sync coordinator now that BookReader is ready.
+    // Must run exactly once and before any HTTP handler or UI path that
+    // could call kosync_get_coordinator().
+    kosync_initialize_coordinator(reader);
+
     // Restore state from before deep sleep, or default to library
     if (wakingFromSleep) {
         Preferences prefs;
@@ -1201,6 +1255,27 @@ void button_action_execute(uint8_t action) {
 }
 
 void loop() {
+    // ── Toast cooldown (per-tick, always) ────────────────────────────
+    ui_toast_tick();
+
+    // ── Deferred state transition: an HTTP handler asked to display the
+    // out-of-band PIN. The flag is atomic so this is safe even if the
+    // dispatch eventually moves to a different core. exchange(false)
+    // consumes the request exactly once.
+    if (g_kosyncShowPinRequested.exchange(false)) {
+        appState = STATE_KOSYNC_PIN_PROMPT;
+        needsRedraw = true;
+    }
+
+    // ── State-tick for PIN prompt (countdown + auto-exit on consume/expire)
+    if (appState == STATE_KOSYNC_PIN_PROMPT) {
+        AppState next = ui_kosync_pin_prompt_tick();
+        if (next != appState) {
+            appState = next;
+            needsRedraw = true;
+        }
+    }
+
     if (appState == STATE_WIFI) {
         wifi_upload_handle();
 
@@ -1474,6 +1549,9 @@ void loop() {
                     case STATE_WIFI:      handleWifiTouch(tx, ty);              break;
                     case STATE_WIFI_SETUP:    handleWifiSetupTouch(tx, ty);     break;
                     case STATE_WIFI_KEYBOARD: handleKeyboardTouch(tx, ty);      break;
+                    case STATE_KOSYNC_SETUP:      handleKosyncSetupTouch(tx, ty);     break;
+                    case STATE_SYNC_CONFLICT:     handleSyncConflictTouch(tx, ty);    break;
+                    case STATE_KOSYNC_PIN_PROMPT: handleKosyncPinPromptTouch(tx, ty); break;
                     case STATE_BOOT:
                         // Splash phase — touches are deliberately ignored
                         // until setup() finishes the state transition.
@@ -1509,6 +1587,9 @@ void loop() {
             case STATE_WIFI:      drawWifiScreen();      break;
             case STATE_WIFI_SETUP:    drawWifiSetupScreen(); break;
             case STATE_WIFI_KEYBOARD: drawKeyboardScreen();  break;
+            case STATE_KOSYNC_SETUP:      drawKosyncSetupScreen();     break;
+            case STATE_SYNC_CONFLICT:     drawSyncConflictScreen();    break;
+            case STATE_KOSYNC_PIN_PROMPT: drawKosyncPinPromptScreen(); break;
             case STATE_BOOT:
                 // Splash already painted by drawSplashScreen() in setup();
                 // nothing to redraw here.
