@@ -23,229 +23,7 @@
   <link rel="stylesheet" href="../shared/fonts.css" />
   <link rel="stylesheet" href="../shared/design.css" />
 
-  <style>
-    /* ─── Optimizer-only — drop zone, queue, progress board ─────────
-     * Tokens come from ../shared/design.css. Page-local rules stay
-     * here so the hub and flasher don't ship optimizer CSS they never
-     * use. Migrates to web/optimizer/src/ui/styles.css when WP-7 lands. */
-
-    .drop {
-      border: 2px dashed var(--surface-edge);
-      border-radius: var(--radius-card);
-      background: var(--surface);
-      padding: clamp(2rem, 3vw + 1rem, 3.5rem);
-      text-align: center;
-      transition: border-color var(--duration-base) var(--ease),
-                  background var(--duration-base) var(--ease),
-                  transform var(--duration-base) var(--ease);
-      margin-bottom: 2rem;
-      cursor: pointer;
-    }
-    .drop:hover,
-    .drop:focus-within,
-    .drop[data-drag="active"] {
-      border-color: var(--accent);
-      background: var(--bg-deep);
-      transform: translateY(-1px);
-    }
-    .drop p {
-      margin: 0.5rem 0 0;
-      color: var(--ink-muted);
-      font-size: 0.97rem;
-    }
-    .drop strong {
-      color: var(--ink);
-      font-family: var(--font-display);
-      font-weight: 500;
-      font-variation-settings: "opsz" 36;
-      font-size: 1.3rem;
-      letter-spacing: -0.01em;
-    }
-    .drop input[type="file"] {
-      position: absolute;
-      opacity: 0;
-      width: 0;
-      height: 0;
-    }
-    .drop-cta {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      margin-top: 1rem;
-      color: var(--accent);
-      font-weight: 600;
-      font-size: 0.95rem;
-    }
-    .drop-cta::after {
-      content: "→";
-      font-family: var(--font-display);
-      font-style: italic;
-      font-weight: 300;
-    }
-
-    .presets {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 1rem;
-      margin-bottom: 2rem;
-      padding: 1.25rem 1.5rem;
-      background: var(--surface);
-      border: 1px solid var(--surface-edge);
-      border-radius: var(--radius-card);
-    }
-    .preset-row {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      font-size: 0.95rem;
-      color: var(--ink);
-    }
-    .preset-row label {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      cursor: pointer;
-      padding: 0.4rem 0.8rem;
-      border-radius: var(--radius-pill);
-      border: 1px solid var(--surface-edge);
-      background: var(--bg);
-      transition: background var(--duration-fast) var(--ease),
-                  border-color var(--duration-fast) var(--ease);
-    }
-    .preset-row label:has(input:checked) {
-      background: var(--accent);
-      color: var(--accent-ink);
-      border-color: var(--accent);
-    }
-    .preset-row input[type="radio"],
-    .preset-row input[type="checkbox"] {
-      accent-color: var(--accent);
-      margin-right: 0.2rem;
-    }
-
-    .queue {
-      list-style: none;
-      margin: 0 0 2rem;
-      padding: 0;
-      display: grid;
-      gap: 1rem;
-    }
-    .queue:empty { display: none; }
-    .queue li {
-      background: var(--surface);
-      border: 1px solid var(--surface-edge);
-      border-radius: var(--radius-card);
-      padding: 1.25rem 1.5rem;
-      display: grid;
-      gap: 0.5rem;
-      box-shadow: var(--shadow-card);
-    }
-    .queue .qi-title {
-      font-family: var(--font-display);
-      font-weight: 500;
-      font-variation-settings: "opsz" 24;
-      font-size: 1.1rem;
-      color: var(--ink);
-      letter-spacing: -0.005em;
-    }
-    .queue .qi-status {
-      color: var(--ink-muted);
-      font-size: 0.9rem;
-      font-feature-settings: "tnum";
-    }
-    .queue .qi-status[data-state="error"] { color: oklch(56% 0.18 30); }
-    .queue .qi-status[data-state="done"]  { color: var(--accent); }
-    .queue .qi-bar {
-      height: 4px;
-      border-radius: 2px;
-      background: var(--bg-deep);
-      overflow: hidden;
-    }
-    .queue .qi-bar > span {
-      display: block;
-      height: 100%;
-      width: 0%;
-      background: var(--accent);
-      transition: width 200ms var(--ease);
-    }
-
-    .progress[hidden] { display: none; }
-
-    .downloads:empty { display: none; }
-    .downloads {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 0.75rem;
-      margin-bottom: 2rem;
-    }
-    .downloads a {
-      display: inline-flex;
-      align-items: center;
-      gap: 0.4rem;
-      padding: 0.7rem 1.2rem;
-      border-radius: var(--radius-pill);
-      background: var(--accent);
-      color: var(--accent-ink);
-      font-weight: 600;
-      font-size: 0.95rem;
-      text-decoration: none;
-      transition: transform var(--duration-fast) var(--ease);
-    }
-    .downloads a:hover { transform: translateY(-1px); }
-
-    .browser-hint[hidden] { display: none; }
-    .browser-hint {
-      background: var(--highlight);
-      border: 1px solid var(--surface-edge);
-      border-radius: var(--radius-card);
-      padding: 1rem 1.25rem;
-      margin-bottom: 1.5rem;
-      color: var(--ink-muted);
-      font-size: 0.9rem;
-    }
-
-    .privacy-note {
-      color: var(--ink-soft);
-      font-size: 0.85rem;
-      max-width: var(--measure-prose);
-      margin: 2rem 0 0;
-    }
-
-    .metadata-panel[hidden] { display: none; }
-    .metadata-panel {
-      background: var(--surface);
-      border: 1px solid var(--surface-edge);
-      border-radius: var(--radius-card);
-      padding: 1.5rem 1.75rem;
-      margin-bottom: 2rem;
-      box-shadow: var(--shadow-card);
-    }
-    .metadata-panel form {
-      display: grid;
-      gap: 0.6rem;
-      max-width: 32rem;
-    }
-    .metadata-panel label {
-      font-size: 0.85rem;
-      color: var(--ink-muted);
-      font-weight: 500;
-    }
-    .metadata-panel input {
-      font: inherit;
-      font-size: 0.97rem;
-      padding: 0.55rem 0.75rem;
-      border: 1px solid var(--surface-edge);
-      border-radius: 8px;
-      background: var(--bg);
-      color: var(--ink);
-      transition: border-color var(--duration-fast) var(--ease);
-    }
-    .metadata-panel input:focus {
-      outline: none;
-      border-color: var(--accent);
-      box-shadow: 0 0 0 3px oklch(from var(--accent) l c h / 0.18);
-    }
-  </style>
+  <link rel="stylesheet" href="./index.css" />
 </head>
 <body>
   <div class="shell">
@@ -276,7 +54,7 @@
     </div>
 
     <section aria-labelledby="drop-heading">
-      <h2 id="drop-heading" style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Drop your EPUB files</h2>
+      <h2 id="drop-heading" class="visually-hidden">Drop your EPUB files</h2>
       <label class="drop" id="drop-zone" for="file-input" data-drag="idle">
         <strong>Drop EPUB files here</strong>
         <p>Or pick them with the button below — your files stay in this browser tab.</p>
@@ -285,18 +63,135 @@
       </label>
     </section>
 
-    <fieldset class="presets" id="presets">
-      <legend style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;">Optimization options</legend>
+    <form id="options" class="options" aria-labelledby="options-heading">
+      <header class="options-head">
+        <h2 id="options-heading">Options</h2>
+        <p>Defaults match what the Paperloom display expects. Switch to <em>Custom</em> if you want to dial in something specific.</p>
+      </header>
 
-      <div class="preset-row" role="radiogroup" aria-label="Preset">
-        <label><input type="radio" name="preset" value="quick" />Quick</label>
-        <label><input type="radio" name="preset" value="full" checked />Full Paperloom</label>
-      </div>
+      <fieldset class="preset-tiles" id="presets">
+        <legend class="visually-hidden">Preset</legend>
 
-      <div class="preset-row">
-        <label><input type="checkbox" id="light-novel" /> Light Novel mode</label>
-      </div>
-    </fieldset>
+        <label class="preset-tile">
+          <input type="radio" name="preset" value="quick" />
+          <svg viewBox="0 0 28 28" class="preset-glyph" aria-hidden="true">
+            <path d="M14 3 8 16h5l-1 9 7-13h-5l1-9Z" />
+          </svg>
+          <strong>Quick</strong>
+          <span>Images + text only</span>
+        </label>
+
+        <label class="preset-tile">
+          <input type="radio" name="preset" value="full" checked />
+          <svg viewBox="0 0 28 28" class="preset-glyph" aria-hidden="true">
+            <path d="M14 3v6M14 19v6M3 14h6M19 14h6M6.5 6.5l4.2 4.2M17.3 17.3l4.2 4.2M21.5 6.5l-4.2 4.2M10.7 17.3l-4.2 4.2" />
+          </svg>
+          <strong>Full</strong>
+          <span>Paperloom-tuned</span>
+        </label>
+
+        <label class="preset-tile">
+          <input type="radio" name="preset" value="custom" />
+          <svg viewBox="0 0 28 28" class="preset-glyph" aria-hidden="true">
+            <path d="M21 8a3.5 3.5 0 0 1-4.8 3.25L8 19.5a2.1 2.1 0 1 1-3-3l8.25-8.25A3.5 3.5 0 0 1 17.7 4l-3.2 3.2 1.8 1.8L19.5 5.8A3.5 3.5 0 0 1 21 8Z" />
+          </svg>
+          <strong>Custom</strong>
+          <span>Pick &amp; choose</span>
+        </label>
+      </fieldset>
+
+      <fieldset class="toggle-grid" id="feature-toggles">
+        <legend class="visually-hidden">Pipeline steps</legend>
+
+        <label class="toggle-card">
+          <input type="checkbox" name="contrastBoost" checked />
+          <span class="toggle-box" aria-hidden="true"></span>
+          <span class="toggle-body">
+            <strong>Contrast Boost</strong>
+            <small>Lift mid-tones for e-ink readability</small>
+          </span>
+        </label>
+
+        <label class="toggle-card">
+          <input type="checkbox" name="removeFonts" checked />
+          <span class="toggle-box" aria-hidden="true"></span>
+          <span class="toggle-body">
+            <strong>Remove Fonts</strong>
+            <small>Strip embedded font files</small>
+          </span>
+        </label>
+
+        <label class="toggle-card">
+          <input type="checkbox" name="cleanCss" checked />
+          <span class="toggle-box" aria-hidden="true"></span>
+          <span class="toggle-body">
+            <strong>Clean CSS</strong>
+            <small>Drop unused selectors &amp; minify</small>
+          </span>
+        </label>
+
+        <label class="toggle-card">
+          <input type="checkbox" name="generateCover" checked />
+          <span class="toggle-box" aria-hidden="true"></span>
+          <span class="toggle-body">
+            <strong>Generate Cover</strong>
+            <small>Make a title/author cover if missing</small>
+          </span>
+        </label>
+
+        <label class="toggle-card">
+          <input type="checkbox" name="cleanMetadata" checked />
+          <span class="toggle-box" aria-hidden="true"></span>
+          <span class="toggle-body">
+            <strong>Clean Metadata</strong>
+            <small>Strip Calibre / store-specific tags</small>
+          </span>
+        </label>
+
+        <label class="toggle-card">
+          <input type="checkbox" name="textCleanup" checked />
+          <span class="toggle-box" aria-hidden="true"></span>
+          <span class="toggle-body">
+            <strong>Text Cleanup</strong>
+            <small>Whitespace, OCR ligatures, smart quotes, NFC</small>
+          </span>
+        </label>
+      </fieldset>
+
+      <label class="toggle-card toggle-card--wide">
+        <input type="checkbox" name="lightNovel" />
+        <span class="toggle-box" aria-hidden="true"></span>
+        <span class="toggle-body">
+          <strong>Light Novel Mode</strong>
+          <small>Rotate landscape art and split double-page spreads into two portrait pages</small>
+        </span>
+      </label>
+
+      <fieldset class="quality" aria-labelledby="quality-heading">
+        <legend id="quality-heading">JPEG Quality</legend>
+
+        <div class="quality-presets" role="radiogroup" aria-label="JPEG quality preset">
+          <label><input type="radio" name="qualityPreset" value="60" />Low</label>
+          <label><input type="radio" name="qualityPreset" value="70" checked />Med</label>
+          <label><input type="radio" name="qualityPreset" value="78" />High</label>
+          <label><input type="radio" name="qualityPreset" value="90" />Max</label>
+        </div>
+
+        <div class="quality-slider">
+          <input id="jpeg-quality" name="jpegQuality" type="range" min="40" max="95" step="1" value="70" />
+          <output for="jpeg-quality" id="jpeg-quality-out">70%</output>
+        </div>
+        <p class="quality-hint">Higher means crisper text and detail, larger files. The Paperloom display is grayscale-only — anything past ~80% is usually wasted.</p>
+      </fieldset>
+
+      <button type="submit" id="optimize-cta" class="primary-cta" disabled>
+        <svg viewBox="0 0 24 24" aria-hidden="true">
+          <path d="M12 16V4M6 10l6-6 6 6" />
+          <path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" />
+        </svg>
+        <span>Optimize EPUBs</span>
+      </button>
+    </form>
 
     <!--
       Optional metadata-edit panel. Hidden by default; WP-7 (UI binding)
@@ -332,12 +227,11 @@
     </p>
 
     <!--
-      Lazy bundle hook. Real script body lands in WP-7 (UI binding layer).
-      Until then this file load 404s silently — that's by design while the
-      pipeline is being built. CI will treat the missing artifact as an
-      expected gap for milestone M1.
+      Bundle hook lives here. Re-enable with WP-8 once esbuild ships
+      docs/optimizer/optimizer.js + docs/optimizer/image-worker.js. Until
+      then keep it out of the page so DevTools stays quiet:
+      <script type="module" src="./optimizer.js" defer></script>
     -->
-    <script type="module" src="./optimizer.js" defer></script>
   </div>
 
   <footer>
