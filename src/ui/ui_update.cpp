@@ -217,7 +217,7 @@ AppState ui_ota_touch(int x, int y, OtaState& otaState) {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// WiFi Upload screen
+// WiFi Manager screen
 // ═══════════════════════════════════════════════════════════════════
 
 static void drawQrCode(const char* text, int cx, int cy, int moduleSize) {
@@ -249,7 +249,7 @@ static unsigned long lastDotsUpdate = 0;
 void ui_wifi_draw() {
     display_set_font_size(2);  // chrome always in Inter
     display_fill_screen(15);
-    drawHeader("WiFi Upload");
+    drawHeader("WiFi Manager");
 
     int y = HEADER_HEIGHT + 40;
 

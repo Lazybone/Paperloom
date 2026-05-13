@@ -74,7 +74,7 @@ pio run -t upload
 
 1. Insert SD card, power on.
 2. Open **Settings → WiFi Setup**. Pick your network, type the password on the on-screen keyboard.
-3. Open **Settings → WiFi Upload**. The screen shows an IP address like `http://192.168.1.42/`.
+3. Open **Settings → WiFi Manager**. The screen shows an IP address like `http://192.168.1.42/`.
 4. Open that address in any browser on the same network — drag-and-drop EPUBs.
 
 ### Optional: pre-optimize books before uploading
@@ -149,9 +149,9 @@ Set them up in **Settings → Device**.
 
 ---
 
-## The web uploader
+## The WiFi Manager
 
-When you turn on **Settings → WiFi Upload**, the device starts a small web server on your home network. Open the displayed address in a browser to:
+When you turn on **Settings → WiFi Manager**, the device starts a small web server on your home network. Open the displayed address in a browser to:
 
 - Upload books (up to 200 MB per file)
 - Download or delete books

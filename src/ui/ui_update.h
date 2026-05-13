@@ -30,9 +30,9 @@ void ui_ota_tick(OtaState& otaState);
 // Performs download if update available and tapped.
 AppState ui_ota_touch(int x, int y, OtaState& otaState);
 
-// ─── WiFi Upload Screen ────────────────────────────────────────────
+// ─── WiFi Manager Screen ───────────────────────────────────────────
 
-// Draw the WiFi upload screen (IP address, QR code).
+// Draw the WiFi Manager screen (IP address, QR code).
 void ui_wifi_draw();
 
 // Handle touch on WiFi screen.

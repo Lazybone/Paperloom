@@ -365,8 +365,8 @@ void ui_settings_draw(bool& settingsFromLibrary) {
         drawRow(y, "Button Setup", "[ > ]");
         y += SETTINGS_ROW_H;
 
-        // WiFi Upload
-        drawRow(y, "WiFi Upload", "[ Open ]");
+        // WiFi Manager
+        drawRow(y, "WiFi Manager", "[ Open ]");
         y += SETTINGS_ROW_H;
 
         // WiFi Setup (on-device scanner + keyboard)
@@ -615,7 +615,7 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                 case 3: // Button Setup → submenu
                     settingsPage = PAGE_BUTTONS;
                     return STATE_SETTINGS;
-                case 4: // WiFi Upload
+                case 4: // WiFi Manager
                     return STATE_WIFI;
                 case 5: // WiFi Setup (on-device scan + keyboard)
                     return STATE_WIFI_SETUP;

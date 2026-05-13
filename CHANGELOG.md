@@ -38,6 +38,13 @@ All notable changes to this firmware will be documented in this file.
 - README installer section now mentions the hub layout and points users
   to the optional EPUB optimizer.
 
+### Changed
+- Renamed the on-device "WiFi Upload" screen to **"WiFi Manager"** — it
+  has always done more than upload (file browser, full settings panel
+  including WiFi, reading, frontlight, buttons), and the old label
+  undersold it. Internal C++ symbols (`wifi_upload_*`) kept for the
+  diff's sake; only the user-facing strings + comments changed.
+
 ### Removed
 - The legacy duplicate `manifest.json` at the site root. Firmware OTA
   reads `https://api.github.com/repos/Lazybone/Paperloom/releases/latest`

@@ -301,7 +301,7 @@ static void drawOtaScreen() {
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// WiFi Upload screen (delegated to ui/ui_update)
+// WiFi Manager screen (delegated to ui/ui_update)
 // ═══════════════════════════════════════════════════════════════════
 
 static void drawWifiScreen() {
