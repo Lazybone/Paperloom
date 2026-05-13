@@ -43,7 +43,7 @@ You have two options.
 
 The fastest way. Works on Windows, macOS, Linux, and ChromeOS — no drivers, no PlatformIO, no command line.
 
-1. Open **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** in **Google Chrome**, **Microsoft Edge**, or **Opera** on a desktop computer.
+1. Open **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** in **Google Chrome**, **Microsoft Edge**, or **Opera** on a desktop computer. The hub page lists two tools — pick **"Install firmware"**.
    _(Firefox and Safari are not supported — they don't implement Web Serial.)_
 2. Plug the e-reader into your computer with a **USB-C cable** that supports data (not just charging).
 3. On the device, hold the **BOOT** button while pressing **RST** once, then release BOOT. This forces download mode.
@@ -72,6 +72,10 @@ pio run -t upload
 2. Open **Settings → WiFi Setup**. Pick your network, type the password on the on-screen keyboard.
 3. Open **Settings → WiFi Upload**. The screen shows an IP address like `http://192.168.1.42/`.
 4. Open that address in any browser on the same network — drag-and-drop EPUBs.
+
+### Optional: pre-optimize books before uploading
+
+The same hub at **[lazybone.github.io/Paperloom](https://lazybone.github.io/Paperloom/)** has a second tool: **EPUB optimizer**. Drop one or more EPUBs in your browser; it quantises images to the 16-gray palette the e-paper display can actually show, strips embedded fonts and unused CSS, repairs the table of contents, and hands back a smaller, sharper EPUB. Everything runs in the browser tab — books never leave your machine. Then drag the optimised file onto the WiFi uploader in step 4. See [`docs/optimizer/README.md`](docs/optimizer/README.md) for the full pipeline.
 
 ---
 

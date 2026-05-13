@@ -226,12 +226,10 @@
       the port itself is MIT-licensed alongside Paperloom.
     </p>
 
-    <!--
-      Bundle hook lives here. Re-enable with WP-8 once esbuild ships
-      docs/optimizer/optimizer.js + docs/optimizer/image-worker.js. Until
-      then keep it out of the page so DevTools stays quiet:
-      <script type="module" src="./optimizer.js" defer></script>
-    -->
+    <!-- Bundle hook. Built by web/optimizer (esbuild -> dist/optimizer.js) and
+         copied here by scripts/copy-to-docs.mjs. The image worker is loaded
+         lazily by the bundle when the OffscreenCanvas/WebCodecs path picks it. -->
+    <script type="module" src="./optimizer.js" defer></script>
   </div>
 
   <footer>

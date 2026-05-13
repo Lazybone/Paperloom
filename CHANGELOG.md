@@ -4,6 +4,47 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+### Added
+- **GitHub Pages Workshop**: the install page at `lazybone.github.io/Paperloom/`
+  is now a hub with two cards. The existing web installer moved to
+  `/flasher/`; a new **EPUB optimizer** at `/optimizer/` runs a full
+  client-side optimisation pipeline ported from
+  [b1rdmania/epubkit](https://github.com/b1rdmania/epubkit). The optimizer
+  quantises images to the 16-gray Paperloom palette, strips embedded fonts,
+  prunes unused CSS, repairs the TOC, normalises text (whitespace,
+  OCR-ligatures, smart quotes, NFC), and re-packages the EPUB. Everything
+  runs in the browser tab — no upload, no analytics, no server.
+- Shared design layer at `docs/shared/` (`design.css`, `fonts.css`).
+  Hub, flasher, and optimizer all import the same OKLCH "Paper/Lamplight"
+  tokens, Fraunces + Inter typography, and section primitives.
+- `web/optimizer/` npm workspace (TypeScript + esbuild + Vitest +
+  GoogleFonts SRI-friendly @import). Output bundles land in
+  `docs/optimizer/optimizer.js` + `docs/optimizer/image-worker.js`,
+  enforced under a 200 KB gzipped budget by `scripts/size-check.mjs`.
+- GitHub Actions workflow `.github/workflows/optimizer-build.yml` that
+  installs, lints, tests, builds, gates bundle sizes, and commits the
+  static artifacts back to `docs/optimizer/` for GitHub Pages.
+- `LICENSES/MIT-epubkit.txt` records the upstream MIT attribution.
+
+### Changed
+- `docs/index.html` is now the Workshop hub; the install card moved to
+  `/docs/flasher/`. esp-web-tools v10.2.1 is pinned with SRI on the
+  entry module. CSP on every page is explicit per surface (hub strict,
+  flasher allows unpkg + GitHub release hosts, optimizer denies all
+  network egress).
+- Page-local CSS for each surface lives in a sibling `.css` file (no
+  more inline `<style>` blocks). The strict `style-src 'self'` CSP no
+  longer breaks the rendered pages.
+- README installer section now mentions the hub layout and points users
+  to the optional EPUB optimizer.
+
+### Removed
+- The legacy duplicate `docs/manifest.json` at the repo root. Firmware
+  OTA reads `https://api.github.com/repos/Lazybone/Paperloom/releases/latest`
+  directly (see `src/ota_update.cpp:165`); only the esp-web-install
+  button consumed `manifest.json` and it now reads
+  `docs/flasher/manifest.json` via its relative attribute.
+
 ## v0.2.1 — 2026-05-12
 
 ### Fixed
