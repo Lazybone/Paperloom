@@ -13,9 +13,6 @@ static const int H = PORTRAIT_H;
 static const int FONT_H = 50;  // UI font height — medium reader font advance_y
 static const int BOOK_ITEM_H = FONT_H * 2 + 12;  // title + info + padding
 
-static const char* filterNames[] = {"ALL", "NEW", "READING", "DONE"};
-static const int NUM_FILTERS = 4;
-static const int FILTER_TAB_H = 44;
 static const char* librarySortNames[] = {"Title", "Author", "Recent", "Size"};
 
 extern BookReader reader;
@@ -197,24 +194,6 @@ static void drawDefaultPoster(BookInfo& book, int x, int y, int w, int h) {
     }
 }
 
-static void drawFilterTabs(int activeFilter) {
-    int tabY = HEADER_HEIGHT;
-    display_draw_filled_rect(0, tabY, W, FILTER_TAB_H, 15);
-
-    int tabW = W / NUM_FILTERS;
-    for (int i = 0; i < NUM_FILTERS; i++) {
-        int tx = i * tabW;
-        if (i == activeFilter) {
-            display_draw_filled_rect(tx + 2, tabY + 2, tabW - 4, FILTER_TAB_H - 4, 15);
-            display_draw_hline(tx + 2, tabY + FILTER_TAB_H - 2, tabW - 4, 0);
-        }
-        int tw = display_text_width(filterNames[i]);
-        uint8_t color = (i == activeFilter) ? 0 : 0;
-        display_draw_text(tx + (tabW - tw) / 2, tabY + FILTER_TAB_H - 10, filterNames[i], color);
-    }
-    display_draw_hline(0, tabY + FILTER_TAB_H, W, 10);
-}
-
 void ui_library_draw(
     std::vector<BookInfo>& books,
     int& scroll,
@@ -225,7 +204,6 @@ void ui_library_draw(
     display_set_font_size(2);
     display_fill_screen(15);
     drawLibraryHeader("Library");
-    drawFilterTabs(filter);
 
     const Settings& s = settings_get();
     const auto& visibleIdx = filteredIndices;
@@ -257,7 +235,7 @@ void ui_library_draw(
         int mw = display_text_width(msg);
         display_draw_text((W - mw) / 2, cy, msg, 0);
     } else if (s.libraryViewMode == 1) {
-        int y = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+        int y = HEADER_HEIGHT + MARGIN_Y;
 
         int currentIdx = library_find_current_book(books);
         if (currentIdx >= 0 && filter == FILTER_ALL) {
@@ -319,7 +297,7 @@ void ui_library_draw(
             display_draw_text((W - pw) / 2, pageInfoY, pageStr, 0);
         }
     } else {
-        int y = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+        int y = HEADER_HEIGHT + MARGIN_Y;
 
         int currentIdx = library_find_current_book(books);
         if (currentIdx >= 0 && filter == FILTER_ALL) {
@@ -419,7 +397,7 @@ void ui_library_draw(
         const int gap = 18;
         int posterH = 310;
         int posterW = (W - MARGIN_X * 2 - gap) / cols;
-        int rowsVisible = max(1, (H - HEADER_HEIGHT - FILTER_TAB_H - FOOTER_HEIGHT - MARGIN_Y) / (posterH + 14));
+        int rowsVisible = max(1, (H - HEADER_HEIGHT - FOOTER_HEIGHT - MARGIN_Y) / (posterH + 14));
         int cardsPerPage = rowsVisible * cols;
         cover_precache_page(books, filteredIndices, scroll, cardsPerPage);
     }
@@ -469,24 +447,13 @@ AppState ui_library_touch(
         return STATE_LIBRARY;
     }
 
-    if (y >= HEADER_HEIGHT && y < HEADER_HEIGHT + FILTER_TAB_H) {
-        int tabW = W / NUM_FILTERS;
-        int newFilter = x / tabW;
-        if (newFilter >= 0 && newFilter < NUM_FILTERS && newFilter != (int)filter) {
-            filter = (LibraryFilter)newFilter;
-            scroll = 0;
-            filteredIndices = library_filter(books, filter);
-        }
-        return STATE_LIBRARY;
-    }
-
     if (books.empty() || filteredIndices.empty()) return STATE_LIBRARY;
 
     const Settings& s = settings_get();
     int numVisible = (int)filteredIndices.size();
 
     int currentIdx = library_find_current_book(books);
-    int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+    int listStartY = HEADER_HEIGHT + MARGIN_Y;
 
     if (currentIdx >= 0 && filter == FILTER_ALL) {
         int bannerBottom = listStartY + FONT_H + 16 + MARGIN_Y;

@@ -263,8 +263,6 @@ static void drawSplashScreen(const char* statusMsg = "Starting up...") {
 // Library screen
 // ═══════════════════════════════════════════════════════════════════
 
-static const int FILTER_TAB_H = 44;
-
 static void updateFilteredIndices() {
     filteredIndices = library_filter(books, libraryFilter);
 }
@@ -1122,7 +1120,7 @@ static void buttonPageForward() {
     } else if (appState == STATE_LIBRARY && !filteredIndices.empty()) {
         const Settings& s = settings_get();
         int numVis = (int)filteredIndices.size();
-        int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+        int listStartY = HEADER_HEIGHT + MARGIN_Y;
         if (library_find_current_book(books) >= 0 && libraryFilter == FILTER_ALL) listStartY += FONT_H + 20;
         int itemsPerPage;
         if (s.libraryViewMode == 1) {
@@ -1149,7 +1147,7 @@ static void buttonPageBackward() {
         }
     } else if (appState == STATE_LIBRARY && !filteredIndices.empty()) {
         const Settings& s = settings_get();
-        int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+        int listStartY = HEADER_HEIGHT + MARGIN_Y;
         if (library_find_current_book(books) >= 0 && libraryFilter == FILTER_ALL) listStartY += FONT_H + 20;
         int itemsPerPage;
         if (s.libraryViewMode == 1) {
@@ -1508,7 +1506,7 @@ void loop() {
                     const Settings& s = settings_get();
                     int numVis = (int)filteredIndices.size();
                     int itemsPerPage;
-                    int listStartY = HEADER_HEIGHT + FILTER_TAB_H + MARGIN_Y;
+                    int listStartY = HEADER_HEIGHT + MARGIN_Y;
                     if (library_find_current_book(books) >= 0 && libraryFilter == FILTER_ALL) listStartY += FONT_H + 20;
                     if (s.libraryViewMode == 1) {
                         int posterH = 310;
