@@ -462,8 +462,8 @@ static const char UPLOAD_HTML[] PROGMEM = R"rawliteral(
             <label for="kosyncDeviceName">Device name</label>
             <input id="kosyncDeviceName" type="text" maxlength="32" autocomplete="off" spellcheck="false">
           </div>
-          <button type="button" class="btn brand" onclick="saveKosync()">Save KoSync</button>
-          <button type="button" onclick="registerKosync()" style="margin-left:8px">Register new account</button>
+          <button type="button" class="btn brand" style="margin-top:14px" onclick="saveKosync()">Save KoSync</button>
+          <button type="button" class="btn brand" style="margin-top:14px;margin-left:8px" onclick="registerKosync()">Register new account</button>
         </fieldset>
       </div>
 
@@ -1043,9 +1043,9 @@ async function registerKosync() {
 }
 
 async function saveSettings() {
+  const wifiSSIDValue = document.getElementById('set_wifiSSID').value;
+  const wifiPassValue = document.getElementById('set_wifiPass').value;
   const payload = {
-    wifiSSID: document.getElementById('set_wifiSSID').value,
-    wifiPass: document.getElementById('set_wifiPass').value,
     fontSizeLevel: +document.getElementById('set_fontSizeLevel').value,
     lineSpacingLevel: +document.getElementById('set_lineSpacingLevel').value,
     sleepTimeoutMin: +document.getElementById('set_sleepTimeoutMin').value,
@@ -1064,6 +1064,8 @@ async function saveSettings() {
     bootButtonDoubleAction: +document.getElementById('set_bootButtonDoubleAction').value,
     bootButtonLongAction: +document.getElementById('set_bootButtonLongAction').value
   };
+  if (wifiSSIDValue) payload.wifiSSID = wifiSSIDValue;
+  if (wifiPassValue) payload.wifiPass = wifiPassValue;
   const saveBtn = document.getElementById('saveBtn');
   const origLabel = saveBtn.textContent;
   saveBtn.disabled = true;
@@ -1528,7 +1530,9 @@ static void handleApiSettingsPost() {
         String ssid = doc["wifiSSID"].as<String>();
         // 802.11 SSID is max 32 octets. Reject anything longer to bound the
         // heap String and avoid a corrupted save on the SD-resident JSON.
-        if (ssid.length() <= 32) s.wifiSSID = ssid;
+        // Empty preserves the existing SSID (mirror of the wifiPass guard
+        // below) so a blank form field never clobbers a working WiFi config.
+        if (ssid.length() > 0 && ssid.length() <= 32) s.wifiSSID = ssid;
     }
     if (doc.containsKey("wifiPass")) {
         String pw = doc["wifiPass"].as<String>();
