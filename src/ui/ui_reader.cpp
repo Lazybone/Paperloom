@@ -6,7 +6,6 @@
 #include "../debug_trace.h"
 #include "../reader.h"
 #include "../kosync_sync.h"
-#include "../kosync_pin_state.h"
 #include "ui_toast.h"
 #include "ui_reader_kosync_setup.h"
 #include "ui_reader_sync_conflict.h"
@@ -707,10 +706,6 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
                 return STATE_READER;
             }
             case 4: // KoSync Setup — on-device credential entry
-                // Clear any pending PIN/web-UI gate state so the on-device
-                // setup flow starts from a known baseline (and a stale
-                // web-UI PIN cannot accidentally validate during setup).
-                kosync_pin_reset_state();
                 ui_kosync_setup_enter();
                 setNeedsRedraw(true);
                 return STATE_KOSYNC_SETUP;

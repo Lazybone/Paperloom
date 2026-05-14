@@ -25,11 +25,9 @@
 #include "ui/ui_keyboard.h"
 #include "ui/ui_wifi_setup.h"
 #include "kosync_sync.h"
-#include "kosync_pin_state.h"
 #include "ui/ui_toast.h"
 #include "ui/ui_reader_kosync_setup.h"
 #include "ui/ui_reader_sync_conflict.h"
-#include "ui/ui_kosync_pin_prompt.h"
 #include <WiFi.h>
 #include <Preferences.h>
 #include <qrcode.h>
@@ -126,7 +124,7 @@ static const int BOOK_ITEM_H = FONT_H * 2 + 12;  // title + info + padding
 // stay immediately after the last real persistable state. The wake-time
 // kMaxKnownState guard depends on this ordering to reject the sentinel if
 // it ever leaks into Preferences. See include/state.h for the full contract.
-static_assert((int)STATE_KOSYNC_PIN_PROMPT + 1 == (int)STATE_SLEEP_REQUEST,
+static_assert((int)STATE_SYNC_CONFLICT + 1 == (int)STATE_SLEEP_REQUEST,
               "STATE_SLEEP_REQUEST must remain immediately after the last "
               "real persistable state. If you added a new persistable state, "
               "place it BEFORE STATE_SLEEP_REQUEST and update kMaxKnownState.");
@@ -376,11 +374,6 @@ static void drawSyncConflictScreen() {
     needsRedraw = false;
 }
 
-static void drawKosyncPinPromptScreen() {
-    ui_kosync_pin_prompt_draw();
-    needsRedraw = false;
-}
-
 
 // ═══════════════════════════════════════════════════════════════════
 // Touch handlers
@@ -559,14 +552,6 @@ static void handleSyncConflictTouch(int x, int y) {
     }
 }
 
-static void handleKosyncPinPromptTouch(int x, int y) {
-    AppState newState = ui_kosync_pin_prompt_touch(x, y);
-    if (newState != appState) {
-        appState = newState;
-        needsRedraw = true;
-    }
-}
-
 // ═══════════════════════════════════════════════════════════════════
 // Deep sleep
 // ═══════════════════════════════════════════════════════════════════
@@ -614,14 +599,12 @@ static void enterDeepSleep(bool triggeredByButton) {
             resumeState = (int)STATE_LIBRARY;
         }
         // KoSync transient screens collapse to reader on sleep; release any
-        // held busy flag and any pending PIN flow so the next wake is clean.
-        if (appState == STATE_KOSYNC_SETUP || appState == STATE_SYNC_CONFLICT ||
-            appState == STATE_KOSYNC_PIN_PROMPT) {
+        // held busy flag so the next wake is clean.
+        if (appState == STATE_KOSYNC_SETUP || appState == STATE_SYNC_CONFLICT) {
             resumeState = (int)STATE_READER;
             if (kosync_is_coordinator_initialized()) {
                 kosync_get_coordinator().clearBusy();
             }
-            kosync_pin_reset_state();
         }
         prefs.putInt("sleepState", resumeState);
         prefs.putInt("sleepLibScrl", libraryScroll);
@@ -984,7 +967,7 @@ void setup() {
         // Last REAL persistable state — must be updated when adding new states.
         // Sentinels (STATE_SLEEP_REQUEST onward) are intentionally rejected if
         // persisted. Adjacency invariant pinned by file-scope static_assert above.
-        const int kMaxKnownState = (int)STATE_KOSYNC_PIN_PROMPT;
+        const int kMaxKnownState = (int)STATE_SYNC_CONFLICT;
         if (savedState < 0 || savedState > kMaxKnownState ||
             savedState == (int)STATE_BOOT) {
             Serial.printf("Wake: invalid savedState=%d, falling back to library\n", savedState);
@@ -1292,24 +1275,6 @@ void loop() {
     // ── Toast cooldown (per-tick, always) ────────────────────────────
     ui_toast_tick();
 
-    // ── Deferred state transition: an HTTP handler asked to display the
-    // out-of-band PIN. The flag is atomic so this is safe even if the
-    // dispatch eventually moves to a different core. exchange(false)
-    // consumes the request exactly once.
-    if (g_kosyncShowPinRequested.exchange(false)) {
-        appState = STATE_KOSYNC_PIN_PROMPT;
-        needsRedraw = true;
-    }
-
-    // ── State-tick for PIN prompt (countdown + auto-exit on consume/expire)
-    if (appState == STATE_KOSYNC_PIN_PROMPT) {
-        AppState next = ui_kosync_pin_prompt_tick();
-        if (next != appState) {
-            appState = next;
-            needsRedraw = true;
-        }
-    }
-
     if (appState == STATE_WIFI) {
         wifi_upload_handle();
 
@@ -1585,7 +1550,6 @@ void loop() {
                     case STATE_WIFI_KEYBOARD: handleKeyboardTouch(tx, ty);      break;
                     case STATE_KOSYNC_SETUP:      handleKosyncSetupTouch(tx, ty);     break;
                     case STATE_SYNC_CONFLICT:     handleSyncConflictTouch(tx, ty);    break;
-                    case STATE_KOSYNC_PIN_PROMPT: handleKosyncPinPromptTouch(tx, ty); break;
                     case STATE_BOOT:
                         // Splash phase — touches are deliberately ignored
                         // until setup() finishes the state transition.
@@ -1623,7 +1587,6 @@ void loop() {
             case STATE_WIFI_KEYBOARD: drawKeyboardScreen();  break;
             case STATE_KOSYNC_SETUP:      drawKosyncSetupScreen();     break;
             case STATE_SYNC_CONFLICT:     drawSyncConflictScreen();    break;
-            case STATE_KOSYNC_PIN_PROMPT: drawKosyncPinPromptScreen(); break;
             case STATE_BOOT:
                 // Splash already painted by drawSplashScreen() in setup();
                 // nothing to redraw here.

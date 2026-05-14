@@ -15,9 +15,6 @@
 //
 // main.cpp dispatch:
 //   - on entry to STATE_KOSYNC_SETUP, call ui_kosync_setup_enter().
-//     NOTE: the main-loop dispatcher (WP-7) is also responsible for calling
-//     kosync_pin_reset_state() here to clear any in-flight web-UI PIN.
-//     That wiring is intentionally NOT in this module.
 //   - draw  : ui_kosync_setup_draw()
 //   - touch : ui_kosync_setup_touch(x, y) — returns the next AppState
 //             (STATE_KOSYNC_SETUP while still editing,
