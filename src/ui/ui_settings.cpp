@@ -624,6 +624,10 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
 
                     // Reading page is not a submenu, so the row band starts
                     // below the tab strip.
+                    // Keep in sync with PAGE_READING drawRow ordering
+                    // in ui_settings_draw (Font Size, Font Family,
+                    // Line Spacing, Font Preview, Sleep Timeout,
+                    // Cleanup Refresh, then Page Numbers = idx 6).
                     const int row_y =
                         HEADER_HEIGHT + SETTINGS_TAB_H + MARGIN_Y + 10
                         + 6 * SETTINGS_ROW_H;
