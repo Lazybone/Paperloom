@@ -868,15 +868,12 @@ void display_flush() {
             if (!_zones[i].dirty) continue;
             ZoneState& z = _zones[i];
             if (z.w <= 0 || z.h <= 0) {
-#if DISPLAY_FLUSH_LOG || DISPLAY_FLUSH_VERBOSE_LOG
-                // Most common cause: Zone::Overlay was marked dirty but
-                // the caller forgot display_set_overlay_rect() this frame
-                // (the rect is reset to empty after every flush).
                 if ((Zone)i == Zone::Overlay) {
-                    Serial.printf("[FLUSH] WARN: Zone::Overlay dirty but rect empty"
-                                  " — did you forget display_set_overlay_rect()?\n");
+                    // Unconditional — the rect MUST be set each frame an overlay
+                    // is dirty. Silently skipping would freeze the visible overlay.
+                    Serial.printf("[FLUSH] ERROR: Zone::Overlay dirty but rect"
+                                  " empty — caller forgot display_set_overlay_rect().\n");
                 }
-#endif
                 continue;
             }
 
