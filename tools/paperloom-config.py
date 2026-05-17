@@ -32,6 +32,10 @@ DRAIN_SECS = 0.5      # seconds to drain firmware log noise after connect
 TIMEOUT_SECS = 10.0   # seconds to wait for a complete response
 ESPRESSIF_VID = 0x303A  # Espressif Systems USB VID (S3 built-in CDC)
 
+# Set to True via --debug to print every raw line received from the device.
+# Useful to diagnose protocol mismatches (firmware not flashed, wrong port).
+DEBUG = False
+
 
 # ── Port auto-detection ───────────────────────────────────────────────────────
 
@@ -76,8 +80,18 @@ def _open(port: Optional[str]) -> serial.Serial:
         print("ERROR: no USB-CDC port found. Connect the device and try again,\n"
               "       or pass --port /dev/cu.usbmodemXXXX", file=sys.stderr)
         sys.exit(1)
+    # IMPORTANT: ESP32 boards auto-reset when DTR/RTS toggle on port open.
+    # We use the construct-without-open / set-flags / open pattern so the
+    # chip stays running. Without this, every CLI invocation reboots the
+    # device, the firmware misses our command, and we time out.
     try:
-        ser = serial.Serial(port, BAUD, timeout=0.1)
+        ser = serial.Serial()
+        ser.port     = port
+        ser.baudrate = BAUD
+        ser.timeout  = 0.1
+        ser.dtr      = False
+        ser.rts      = False
+        ser.open()
     except serial.SerialException as e:
         print(f"ERROR: cannot open {port}: {e}", file=sys.stderr)
         sys.exit(1)
@@ -121,6 +135,9 @@ def _send_command(ser: serial.Serial, cmd: str) -> Tuple[bool, List[str]]:
 
         if not line:
             continue
+
+        if DEBUG:
+            print(f"  [recv] {line!r}", file=sys.stderr)
 
         # Single-line OK/ERR response
         if not multi:
@@ -229,6 +246,8 @@ def main():
     common = argparse.ArgumentParser(add_help=False)
     common.add_argument("--port", default=None,
                         help="Serial port (auto-detected when omitted)")
+    common.add_argument("--debug", action="store_true",
+                        help="Print every raw line received from the device")
 
     parser = argparse.ArgumentParser(
         description="Configure Paperloom device over USB-Serial.",
@@ -260,6 +279,8 @@ def main():
     p_raw.set_defaults(func=cmd_raw)
 
     args = parser.parse_args()
+    global DEBUG
+    DEBUG = getattr(args, "debug", False)
     args.func(args)
 
 
