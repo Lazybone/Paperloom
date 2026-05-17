@@ -46,7 +46,7 @@ bool ZipReader::open(const char* path) {
 
 void ZipReader::close() {
     if (_f) { fclose(_f); _f = nullptr; }
-    _entries.clear();
+    std::vector<ZipEntry>().swap(_entries);  // force capacity release
 }
 
 // Defensive caps for ZIP fields. EPUBs in practice are well under these
@@ -378,6 +378,7 @@ static String xmlText(const char* xml, const char* tag) {
 
 bool EpubParser::open(const char* filepath) {
     close();
+    _openFilepath = String(filepath);
     if (!_zip.open(filepath)) return false;
     if (!parseContainer()) { close(); return false; }
     return true;
@@ -947,6 +948,26 @@ void EpubParser::setChapterTitleCache(const std::vector<String>& titles) {
             _chapterTitleCache[i] = titles[i];
         }
     }
+}
+
+void EpubParser::release_for_sync() {
+    // Same teardown as close() but ALSO force vector capacity release via
+    // swap-with-empty (the C++ idiom — clear() alone leaves capacity).
+    _zip.close();
+    std::vector<SpineItem>().swap(_spine);
+    std::vector<ManifestItem>().swap(_manifest);
+    std::vector<TocEntry>().swap(_toc);
+    std::vector<String>().swap(_chapterTitleCache);
+    _title = String();
+    _author = String();
+    _basePath = String();
+    _coverImagePath = String();
+    // Do NOT clear _openFilepath — restore_after_sync needs it.
+}
+
+bool EpubParser::restore_after_sync() {
+    if (_openFilepath.length() == 0) return false;
+    return open(_openFilepath.c_str());
 }
 
 // Check if a tag name is a block-level element that should produce a line break

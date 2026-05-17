@@ -430,6 +430,7 @@ bool KosyncSyncCoordinator::tick() {
         if (wifi_) wifi_->release();
         client_.reset();
         busy_.store(false);
+        reader_.restoreParserAfterSync();
         enterPhase(SyncPhase::Cancelled);
     } else {
         switch (phase_) {
@@ -465,6 +466,13 @@ void KosyncSyncCoordinator::runHashing() {
         finishWithToast("KoSync nicht konfiguriert", false);
         return;
     }
+    // WP-10: free EPUB-parser memory (~18 KB internal DMA-RAM) so the
+    // WiFi stack can initialize from reader-context. We restore the
+    // parser in finishWithToast()/finishConflict() before returning
+    // control to the dispatcher/UI.
+    Serial.printf("[kosync_sync] releasing parser before WiFi.begin\n");
+    reader_.releaseParserForSync();
+
     wifi_.reset(new WifiSyncGuard(s));
     auto br = wifi_->begin();
     if (br == WifiSyncGuard::BeginResult::NoCredentials) {
@@ -580,6 +588,8 @@ void KosyncSyncCoordinator::finishWithToast(const String& toast, bool success) {
     if (wifi_) wifi_->release();
     client_.reset();
     busy_.store(false);
+    Serial.printf("[kosync_sync] restoring parser after sync\n");
+    reader_.restoreParserAfterSync();
     enterPhase(success ? SyncPhase::Done : SyncPhase::Failed);
 }
 
@@ -590,6 +600,11 @@ void KosyncSyncCoordinator::finishConflict() {
     pendingResult_.local       = pendingLocal_;
     pendingResult_.remote      = pendingRemote_;
     // wifi_ + busy_ bleiben aktiv — resolveConflict() reused beide.
+    // Parser must be open before AwaitConflict because the user's
+    // resolveConflict choice may trigger applyRemoteProgress which
+    // reads the EPUB.
+    Serial.printf("[kosync_sync] restoring parser before conflict dialog\n");
+    reader_.restoreParserAfterSync();
     enterPhase(SyncPhase::AwaitConflict);
 }
 
@@ -609,6 +624,9 @@ void KosyncSyncCoordinator::cancelIfBusy() {
     if (wifi_) wifi_->release();
     client_.reset();
     busy_.store(false);
+    // If we cancelled mid-sync, the parser is in released state. Restore
+    // it so the reader is usable on resume.
+    reader_.restoreParserAfterSync();
     enterPhase(SyncPhase::Idle);
     lastPhase_ = SyncPhase::Idle;
 }

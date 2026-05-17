@@ -112,6 +112,12 @@ public:
     // redraw (caller's responsibility). Persists via saveProgress() on success.
     ApplyResult applyRemoteProgress(int chapter, int page, float percentage);
 
+    // WP-10: temporarily release parser memory during sync. See EpubParser
+    // for rationale. Safe to call while a book is open; caller must invoke
+    // restoreParserAfterSync() before any chapter navigation.
+    void releaseParserForSync();
+    bool restoreParserAfterSync();
+
 private:
     EpubParser _parser;
     String _title;

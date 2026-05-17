@@ -1035,3 +1035,11 @@ BookReader::ApplyResult BookReader::applyRemoteProgress(int chapter, int page,
     if (!saveProgress()) return ApplyResult::SaveFailed;
     return ApplyResult::Ok;
 }
+
+void BookReader::releaseParserForSync() {
+    _parser.release_for_sync();
+}
+
+bool BookReader::restoreParserAfterSync() {
+    return _parser.restore_after_sync();
+}
