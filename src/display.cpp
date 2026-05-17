@@ -61,10 +61,15 @@ static uint8_t* _lfb = nullptr;
 // bytes at 4-bpp landscape). Allocated once in display_init from PSRAM;
 // each rotatePortraitRegion() reuses the prefix sized to the requested
 // region. Removes the per-flush malloc/free that fragmented the heap on
-// rapid page-turns. Safe for multi-zone flushes because epdiy's
-// epd_hl_update_area() copies the framebuffer synchronously — by the time
-// epd_be_draw_grayscale_image() returns, the buffer is free for reuse.
-// If a future epdiy upgrade ever introduces async draws, this helper
+// rapid page-turns.
+//
+// Safe for multi-zone flushes because the backend copies framebuffer
+// data synchronously before dispatching the waveform update: epd_be_
+// draw_grayscale_image() (see src/epd_backend_epdiy.cpp:165) calls
+// epd_copy_to_framebuffer() which finishes the copy before the call
+// returns, so the persistent buffer can be reused for the next zone's
+// rotation in the same flush. If a future epdiy upgrade ever introduces
+// truly async draws (data consumed after the call returns), this helper
 // would need an in-use flag.
 static constexpr size_t ROTATION_BUF_BYTES = PORTRAIT_W * PORTRAIT_H / 2;
 static uint8_t* _rotation_buf = nullptr;
@@ -412,10 +417,16 @@ void display_init() {
 
     _rotation_buf = (uint8_t*) ps_malloc(ROTATION_BUF_BYTES);
     if (!_rotation_buf) {
-        Serial.printf("[DISP] FATAL: ps_malloc(%u) for rotation buffer failed\n",
+        // Downgrade vs the _pfb/_lfb FATAL handlers: those buffers are
+        // load-bearing and we halt without them; the rotation buffer is
+        // an optimization — rotatePortraitRegion falls back to per-flush
+        // malloc when _rotation_buf is null, so the device stays
+        // functional. (That fallback malloc will probably also fail if
+        // PSRAM was tight enough to refuse this upfront 256 KB request,
+        // but failing per-flush is no worse than failing here.)
+        Serial.printf("[DISP] WARN: ps_malloc(%u) for rotation buffer failed"
+                      " — falling back to per-flush malloc\n",
                       (unsigned)ROTATION_BUF_BYTES);
-        // Fall back to per-flush malloc by leaving _rotation_buf == nullptr;
-        // rotatePortraitRegion below handles that path.
     }
 
     glyph_cache_init();
@@ -662,7 +673,11 @@ static uint8_t* rotatePortraitRegion(int px, int py, int pw, int ph, EpdRect& ou
     if (_rotation_buf && outBytes <= ROTATION_BUF_BYTES) {
         // Reuse the persistent PSRAM buffer — no malloc on the flush path.
         out = _rotation_buf;
-    } else {
+    }
+    // Belt-and-braces — current call sites cannot exceed
+    // ROTATION_BUF_BYTES (which is sized for FullScreen), so this
+    // branch is unreachable in practice. Kept as defense-in-depth.
+    else {
         out = (uint8_t*)malloc(outBytes);
         if (!out) return nullptr;
     }
