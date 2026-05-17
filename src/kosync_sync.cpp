@@ -59,9 +59,15 @@ public:
             // esp_wifi_init or STA-enable failed (typically DMA-cap RAM
             // exhausted — see esp_wifi log lines above). No point waiting
             // 10s for a poll() that will never reach Connected.
+            //
+            // CRITICAL: we already called WiFi.mode(WIFI_STA) which
+            // allocates internal WiFi stack memory. Without an explicit
+            // WIFI_OFF here, that allocation accumulates across failed
+            // attempts and eventually starves the DMA heap completely
+            // (observed: dma_largest 28KB → 16 bytes after 1-2 retries).
             Serial.println("[kosync_sync] WiFi.begin returned WL_CONNECT_FAILED");
             WiFi.disconnect(true);
-            // WP-10 Plan B: don't WIFI_OFF — pre-init at boot must survive.
+            WiFi.mode(WIFI_OFF);
             return BeginResult::WifiInitFailed;
         }
         startMs_     = millis();
@@ -101,12 +107,11 @@ public:
     void release() {
         if (released_) return;
         if (weBroughtUp_) {
-            // WP-10 Plan B: keep WiFi stack in STA mode (pre-initialized at
-            // boot from main.cpp setup()). Only drop the AP connection here
-            // so the static esp_wifi allocations survive across sync attempts.
-            // WIFI_OFF would force a re-init on the next attempt — under
-            // reader-context DMA pressure that fails.
+            // Tear down regardless of current WL state: begin() may have been
+            // called but never reached Connected, OR we did connect and now
+            // it's time to release the radio. Both paths need disconnect+OFF.
             WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
         }
         released_ = true;
     }
