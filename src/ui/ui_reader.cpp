@@ -756,14 +756,16 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
 }
 
 void ui_reader_goto_draw(BookReader& reader) {
-    // Go-to picker is a tall overlay (header + value + nudge buttons +
-    // bottom bar). Was display_update_medium() → 6-cycle GC16 clear via
-    // the WP-0.2 shim (visible flash on every nudge tap and on open).
-    // Migrated to Zone::Overlay + StructuralRedraw, which is GL16
-    // non-flashing. The close paths set s_overlayDismissed so the
-    // reader's chrome returns cleanly.
-    tall_overlay_begin();
+    // Uses Zone::FullScreen, NOT Zone::Overlay: this screen paints
+    // drawHeader at y=0..66 and drawBottomBar at y=910..960 — both
+    // outside the body-overlay rect (66..910). FullScreen + GL16
+    // partial sends the whole portrait buffer so chrome stays visible.
+    // (Reverted from Zone::Overlay migration in commit baa17cd, which
+    // hid header/bottom bar.) The close paths set s_overlayDismissed
+    // so the reader's chrome returns cleanly.
+    display_begin_frame();
     display_set_font_size(2);  // chrome always in Inter
+    display_fill_screen(15);
     drawHeader("Go to...", true);
 
     String subtitle = s_gotoPercentMode ? "Percentage" : "Approximate page";
@@ -794,7 +796,8 @@ void ui_reader_goto_draw(BookReader& reader) {
     display_draw_text((W - gw) / 2, 520, goLbl, 4);
 
     drawBottomBar("[ Back to Reading ]");
-    tall_overlay_flush();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     setNeedsRedraw(false);
 }
 
@@ -843,15 +846,17 @@ AppState ui_reader_goto_touch(int x, int y, BookReader& reader,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_toc_draw(BookReader& reader, int& tocScroll) {
-    // TOC is a tall overlay (header + list rows + scroll indicator +
-    // bottom bar). Was display_update_medium() → 6-cycle GC16 clear via
-    // the WP-0.2 shim (visible flash on every open and every Prev/Next
-    // scroll). Now Zone::Overlay + StructuralRedraw → GL16 non-flashing.
-    // The close paths set s_overlayDismissed; the TOC item-select path
-    // additionally drives a chapter jump which already invalidates
-    // body/footer.
-    tall_overlay_begin();
+    // Uses Zone::FullScreen, NOT Zone::Overlay: this screen paints
+    // drawHeader at y=0..66 and drawBottomBar at y=910..960 — both
+    // outside the body-overlay rect (66..910). FullScreen + GL16
+    // partial sends the whole portrait buffer so chrome stays visible.
+    // (Reverted from Zone::Overlay migration in commit ca6b398, which
+    // hid header/bottom bar.) The close paths set s_overlayDismissed;
+    // the TOC item-select path additionally drives a chapter jump
+    // which already invalidates body/footer.
+    display_begin_frame();
     display_set_font_size(2);  // chrome always in Inter
+    display_fill_screen(15);
     drawHeader("Table of Contents", true);
 
     int y = HEADER_HEIGHT + MARGIN_Y;
@@ -925,7 +930,8 @@ void ui_reader_toc_draw(BookReader& reader, int& tocScroll) {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    tall_overlay_flush();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     setNeedsRedraw(false);
 }
 
@@ -1002,13 +1008,17 @@ AppState ui_reader_toc_touch(int x, int y, BookReader& reader,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_bookmarks_draw(BookReader& reader, int& bmScroll) {
-    // Bookmarks list is a tall overlay (same layout as TOC). Was
-    // display_update_medium() → 6-cycle GC16 clear via shim. Now
-    // Zone::Overlay + StructuralRedraw → GL16 non-flashing. The close
-    // paths set s_overlayDismissed so reader chrome returns cleanly;
-    // bookmark-tap path additionally drives chapter jump.
-    tall_overlay_begin();
+    // Uses Zone::FullScreen, NOT Zone::Overlay: this screen paints
+    // drawHeader at y=0..66 and drawBottomBar at y=910..960 — both
+    // outside the body-overlay rect (66..910). FullScreen + GL16
+    // partial sends the whole portrait buffer so chrome stays visible.
+    // (Reverted from Zone::Overlay migration in commit c058578, which
+    // hid header/bottom bar.) The close paths set s_overlayDismissed
+    // so reader chrome returns cleanly; bookmark-tap path additionally
+    // drives a chapter jump.
+    display_begin_frame();
     display_set_font_size(2);  // chrome always in Inter
+    display_fill_screen(15);
     drawHeader("Bookmarks", true);
 
     const auto& bmarks = reader.getBookmarks();
@@ -1060,7 +1070,8 @@ void ui_reader_bookmarks_draw(BookReader& reader, int& bmScroll) {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    tall_overlay_flush();
+    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_flush();
     setNeedsRedraw(false);
 }
 
