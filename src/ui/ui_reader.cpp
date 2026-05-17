@@ -1005,15 +1005,13 @@ AppState ui_reader_toc_touch(int x, int y, BookReader& reader,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_bookmarks_draw(BookReader& reader, int& bmScroll) {
-    // Bookmarks list is a full-screen overlay (same layout as TOC).
-    // Was display_update_medium() → 6-cycle GC16 clear via shim. Now
-    // Zone::FullScreen + StructuralRedraw → GL16 non-flashing. The
-    // close paths set s_overlayDismissed so reader chrome returns
-    // cleanly; bookmark-tap path additionally drives chapter jump.
-    display_begin_frame();
-
+    // Bookmarks list is a tall overlay (same layout as TOC). Was
+    // display_update_medium() → 6-cycle GC16 clear via shim. Now
+    // Zone::Overlay + StructuralRedraw → GL16 non-flashing. The close
+    // paths set s_overlayDismissed so reader chrome returns cleanly;
+    // bookmark-tap path additionally drives chapter jump.
+    tall_overlay_begin();
     display_set_font_size(2);  // chrome always in Inter
-    display_fill_screen(15);
     drawHeader("Bookmarks", true);
 
     const auto& bmarks = reader.getBookmarks();
@@ -1065,8 +1063,7 @@ void ui_reader_bookmarks_draw(BookReader& reader, int& bmScroll) {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
-    display_flush();
+    tall_overlay_flush();
     setNeedsRedraw(false);
 }
 
