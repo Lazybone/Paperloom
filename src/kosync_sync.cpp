@@ -30,7 +30,7 @@
 // header resolves to the same type (C++ ODR requires identical linkage).
 class WifiSyncGuard {
 public:
-    enum class BeginResult { Started, NoCredentials, AlreadyConnected };
+    enum class BeginResult { Started, NoCredentials, AlreadyConnected, WifiInitFailed };
     enum class PollResult  { WaitingShort, Connected, Failed };
 
     explicit WifiSyncGuard(const Settings& s) : ssid_(s.wifiSSID), pass_(s.wifiPass) {}
@@ -54,7 +54,14 @@ public:
                       static_cast<unsigned>(heap_caps_get_largest_free_block(
                           MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)));
         WiFi.mode(WIFI_STA);
-        WiFi.begin(ssid_.c_str(), pass_.c_str());
+        wl_status_t st = WiFi.begin(ssid_.c_str(), pass_.c_str());
+        if (st == WL_CONNECT_FAILED) {
+            // esp_wifi_init or STA-enable failed (typically DMA-cap RAM
+            // exhausted — see esp_wifi log lines above). No point waiting
+            // 10s for a poll() that will never reach Connected.
+            Serial.println("[kosync_sync] WiFi.begin returned WL_CONNECT_FAILED");
+            return BeginResult::WifiInitFailed;
+        }
         startMs_     = millis();
         weBroughtUp_ = true;     // tentativ; release() berücksichtigt es
         return BeginResult::Started;
@@ -295,6 +302,12 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
         busy_.store(false);
         return r;
     }
+    if (br == WifiSyncGuard::BeginResult::WifiInitFailed) {
+        Serial.printf("[kosync_sync] resolve: WiFi init failed\n");
+        r.toast = "Sync fehlgeschlagen: WLAN-Stack nicht startbar";
+        busy_.store(false);
+        return r;
+    }
     if (br == WifiSyncGuard::BeginResult::Started) {
         const uint32_t deadline = millis() + 10000;
         WifiSyncGuard::PollResult pr;
@@ -449,6 +462,11 @@ void KosyncSyncCoordinator::runHashing() {
     if (br == WifiSyncGuard::BeginResult::NoCredentials) {
         Serial.printf("[kosync_sync] sync: no WiFi creds\n");
         finishWithToast("WLAN nicht konfiguriert", false);
+        return;
+    }
+    if (br == WifiSyncGuard::BeginResult::WifiInitFailed) {
+        Serial.printf("[kosync_sync] sync: WiFi init failed (DMA-heap pressure?)\n");
+        finishWithToast("Sync fehlgeschlagen: WLAN-Stack nicht startbar", false);
         return;
     }
     wifiBudgetStartMs_ = millis();
