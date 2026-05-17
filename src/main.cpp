@@ -28,6 +28,7 @@
 #include "ui/ui_toast.h"
 #include "ui/ui_reader_kosync_setup.h"
 #include "ui/ui_reader_sync_conflict.h"
+#include "ui/ui_reader_sync_progress.h"
 #include <WiFi.h>
 #include <Preferences.h>
 #include <qrcode.h>
@@ -372,6 +373,11 @@ static void drawSyncConflictScreen() {
     needsRedraw = false;
 }
 
+static void drawSyncProgressScreen() {
+    ui_sync_progress_draw();
+    needsRedraw = false;
+}
+
 
 // ═══════════════════════════════════════════════════════════════════
 // Touch handlers
@@ -550,6 +556,64 @@ static void handleSyncConflictTouch(int x, int y) {
     }
 }
 
+// Adapter: routet Touch und behandelt Dispatcher-Übergänge fuer
+// Done/Failed/Cancelled (mit Anzeigedauer) sowie AwaitConflict.
+static uint32_t s_syncTerminalPhaseEnteredAtMs = 0;
+
+static void handleSyncProgressTouch(int x, int y) {
+    AppState next = ui_sync_progress_touch(x, y);
+    if (next != STATE_SYNC_PROGRESS) {
+        appState = next;
+        needsRedraw = true;
+    }
+    // tick() im naechsten Frame holt die Cancel-Anforderung ab.
+}
+
+// Anzeigedauern fuer die terminalen Phasen (siehe Spec §5.1).
+constexpr uint32_t kSyncDoneShownMs      = 800;
+constexpr uint32_t kSyncFailedShownMs    = 200;
+constexpr uint32_t kSyncCancelledShownMs = 0;
+
+static void tickSyncProgress() {
+    if (!kosync_is_coordinator_initialized()) return;
+    auto& coord = kosync_get_coordinator();
+    const bool changed = coord.tick();
+    if (changed) needsRedraw = true;
+
+    SyncPhase ph = coord.currentPhase();
+
+    if (ph == SyncPhase::AwaitConflict) {
+        ui_sync_conflict_set_data(coord.takeResult());
+        appState = STATE_SYNC_CONFLICT;
+        needsRedraw = true;
+        s_syncTerminalPhaseEnteredAtMs = 0;
+        return;
+    }
+
+    if (ph == SyncPhase::Done || ph == SyncPhase::Failed ||
+        ph == SyncPhase::Cancelled) {
+        if (changed) {
+            // Erster Frame in der terminalen Phase — Redraw zeigt die
+            // finalen Haekchen / das X. Timer startet jetzt.
+            s_syncTerminalPhaseEnteredAtMs = millis();
+            return;
+        }
+        uint32_t budget;
+        if      (ph == SyncPhase::Done)      budget = kSyncDoneShownMs;
+        else if (ph == SyncPhase::Failed)    budget = kSyncFailedShownMs;
+        else                                  budget = kSyncCancelledShownMs;
+        if (millis() - s_syncTerminalPhaseEnteredAtMs >= budget) {
+            SyncResult r = coord.takeResult();
+            if (r.toast.length() > 0) {
+                ui_toast_show(r.toast, 2500, !r.success);
+            }
+            appState = STATE_READER;
+            needsRedraw = true;
+            s_syncTerminalPhaseEnteredAtMs = 0;
+        }
+    }
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Deep sleep
 // ═══════════════════════════════════════════════════════════════════
@@ -598,7 +662,8 @@ static void enterDeepSleep(bool triggeredByButton) {
         }
         // KoSync transient screens collapse to reader on sleep; release any
         // held busy flag so the next wake is clean.
-        if (appState == STATE_KOSYNC_SETUP || appState == STATE_SYNC_CONFLICT) {
+        if (appState == STATE_KOSYNC_SETUP || appState == STATE_SYNC_CONFLICT ||
+            appState == STATE_SYNC_PROGRESS) {
             resumeState = (int)STATE_READER;
             if (kosync_is_coordinator_initialized()) {
                 kosync_get_coordinator().clearBusy();
@@ -965,7 +1030,7 @@ void setup() {
         // Last REAL persistable state — must be updated when adding new states.
         // Sentinels (STATE_SLEEP_REQUEST onward) are intentionally rejected if
         // persisted. Adjacency invariant pinned by file-scope static_assert above.
-        const int kMaxKnownState = (int)STATE_SYNC_CONFLICT;
+        const int kMaxKnownState = (int)STATE_SYNC_PROGRESS;
         if (savedState < 0 || savedState > kMaxKnownState ||
             savedState == (int)STATE_BOOT) {
             Serial.printf("Wake: invalid savedState=%d, falling back to library\n", savedState);
@@ -1548,6 +1613,7 @@ void loop() {
                     case STATE_WIFI_KEYBOARD: handleKeyboardTouch(tx, ty);      break;
                     case STATE_KOSYNC_SETUP:      handleKosyncSetupTouch(tx, ty);     break;
                     case STATE_SYNC_CONFLICT:     handleSyncConflictTouch(tx, ty);    break;
+                    case STATE_SYNC_PROGRESS:     handleSyncProgressTouch(tx, ty);    break;
                     case STATE_BOOT:
                         // Splash phase — touches are deliberately ignored
                         // until setup() finishes the state transition.
@@ -1569,6 +1635,13 @@ void loop() {
         if (ui_wifi_setup_dirty()) needsRedraw = true;
     }
 
+    if (appState == STATE_SYNC_PROGRESS) {
+        tickSyncProgress();
+        // Hinweis: tickSyncProgress() kann appState veraendern (AwaitConflict,
+        // Done/Failed/Cancelled nach Ablauf der Anzeigedauer). Der Draw-Switch
+        // weiter unten sieht dann den neuen State und zeichnet entsprechend.
+    }
+
     // Redraw if needed
     if (needsRedraw) {
         switch (appState) {
@@ -1585,6 +1658,7 @@ void loop() {
             case STATE_WIFI_KEYBOARD: drawKeyboardScreen();  break;
             case STATE_KOSYNC_SETUP:      drawKosyncSetupScreen();     break;
             case STATE_SYNC_CONFLICT:     drawSyncConflictScreen();    break;
+            case STATE_SYNC_PROGRESS:     drawSyncProgressScreen();    break;
             case STATE_BOOT:
                 // Splash already painted by drawSplashScreen() in setup();
                 // nothing to redraw here.
