@@ -501,10 +501,15 @@ AppState ui_reader_touch(int x, int y, bool isLongPress,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_menu_draw(BookReader& reader) {
-    // Overlay rect — header-bottom to footer-top. All overlay paint MUST
-    // stay within this rect; pixels written outside will not sync back_fb
-    // and may drift on overlay-dismiss. s_overlayDismissed triggers a
-    // Reader 3-zone repaint that restores everything outside.
+    // Overlay rect — header-bottom (y=66) to footer-top (y=910). Only
+    // pixels inside this rect reach the panel: display_flush() rotates
+    // ONLY (x, y, w, h) from _pfb to the heap buffer it sends to epdiy,
+    // so _pfb writes outside the rect are harmless (never rasterized,
+    // never enter epdiy back_fb). On overlay-dismiss, s_overlayDismissed
+    // triggers a Reader 3-zone repaint that overwrites any _pfb residue
+    // outside the rect. Practical contract: paint can extend slightly
+    // outside the rect (e.g. glyph ascenders above the rect top for a
+    // baseline near y=80) without visible artefacts.
     constexpr int OVERLAY_X = 0;
     constexpr int OVERLAY_Y = HEADER_HEIGHT;                  // 66
     constexpr int OVERLAY_W = PORTRAIT_W;                     // 540
