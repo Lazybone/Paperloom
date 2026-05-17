@@ -708,24 +708,15 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
                     setNeedsRedraw(true);
                     return STATE_MENU;
                 }
-                SyncResult result = kosync_get_coordinator().syncNow();
-                if (result.hasConflict) {
-                    // Coordinator leaves the busy flag set; the conflict
-                    // dialog routes the user's decision back through
-                    // resolveConflict() / clearBusy(). Pass the result in
-                    // so the dialog can render local vs. remote without
-                    // re-querying.
-                    ui_sync_conflict_set_data(result);
-                    s_overlayDismissed = true;
+                String toast;
+                if (!kosync_get_coordinator().beginSync(toast)) {
+                    ui_toast_show(toast, 2500, true);  // "Sync laeuft bereits"
                     setNeedsRedraw(true);
-                    return STATE_SYNC_CONFLICT;
-                }
-                if (result.toast.length() > 0) {
-                    ui_toast_show(result.toast, 2500, !result.success);
+                    return STATE_MENU;
                 }
                 s_overlayDismissed = true;
                 setNeedsRedraw(true);
-                return STATE_READER;
+                return STATE_SYNC_PROGRESS;
             }
             case 4: // Settings
                 setNeedsRedraw(true);
