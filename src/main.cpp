@@ -124,7 +124,7 @@ static const int BOOK_ITEM_H = FONT_H * 2 + 12;  // title + info + padding
 // stay immediately after the last real persistable state. The wake-time
 // kMaxKnownState guard depends on this ordering to reject the sentinel if
 // it ever leaks into Preferences. See include/state.h for the full contract.
-static_assert((int)STATE_SYNC_CONFLICT + 1 == (int)STATE_SLEEP_REQUEST,
+static_assert((int)STATE_SYNC_PROGRESS + 1 == (int)STATE_SLEEP_REQUEST,
               "STATE_SLEEP_REQUEST must remain immediately after the last "
               "real persistable state. If you added a new persistable state, "
               "place it BEFORE STATE_SLEEP_REQUEST and update kMaxKnownState.");

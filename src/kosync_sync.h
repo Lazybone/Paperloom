@@ -10,7 +10,17 @@
 
 class BookReader;
 
-enum class SyncPhase { Idle, Hashing, Pulling, AwaitConflict, Pushing, Done, Failed };
+enum class SyncPhase : uint8_t {
+    Idle,
+    Hashing,
+    WaitingWifi,
+    Pulling,
+    AwaitConflict,
+    Pushing,
+    Done,
+    Failed,
+    Cancelled
+};
 
 struct SyncResult {
     bool success;

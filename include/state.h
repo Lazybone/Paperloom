@@ -16,6 +16,7 @@ enum AppState {
     STATE_WIFI_KEYBOARD, // On-screen keyboard for SSID/password entry
     STATE_KOSYNC_SETUP,        // on-device kosync credential entry
     STATE_SYNC_CONFLICT,       // local-vs-remote conflict resolution dialog (WP-9)
+    STATE_SYNC_PROGRESS,       // KoSync progress screen (WP-10)
     // ─── TRIGGER values (NOT real UI states) ───────────────────────────
     // STATE_SLEEP_REQUEST is a transient sentinel returned from
     // ui_reader_menu_touch when the user taps the "Sleep" entry. It is
