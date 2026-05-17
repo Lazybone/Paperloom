@@ -1177,6 +1177,27 @@ void setup() {
     // Configure light sleep with GPIO wakeup
     configureLightSleep();
 
+    // WP-10 Memory-Pressure Mitigation: pre-initialize WiFi stack while
+    // DMA-cap heap is still uncluttered (Library-context, ~49KB largest
+    // block). The init allocations (~28KB) stick around so later WiFi.begin
+    // from Reader-context (~28KB largest block alone) doesn't need to find
+    // contiguous DMA-RAM under pressure.
+    //
+    // Side effects:
+    //   - Radio enters idle-STA state, ~5 mA extra power draw vs WIFI_OFF.
+    //     Mitigated by WiFi.setSleep(true) enabling modem-sleep.
+    //   - WifiSyncGuard::release() and similar should NOT call
+    //     WiFi.mode(WIFI_OFF) anymore — it would undo this pre-init.
+    //     Only WiFi.disconnect(true) (drop AP) is allowed.
+    //   - enterDeepSleep() can still tear down WiFi for low-power sleep.
+    Serial.printf("[wifi-preinit] heap before: dma_largest=%u\n",
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    WiFi.mode(WIFI_STA);
+    WiFi.disconnect(false);  // false = keep NVS credentials
+    WiFi.setSleep(true);     // modem-sleep to reduce idle power
+    Serial.printf("[wifi-preinit] heap after:  dma_largest=%u\n",
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+
     debug_trace_mark("setup:complete");
     Serial.println("Setup complete");
 }
