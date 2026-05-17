@@ -10,6 +10,10 @@
 
 class BookReader;
 
+// Defined in kosync_sync.cpp (not in an anonymous namespace so the
+// forward declaration here is well-formed under C++ ODR).
+class WifiSyncGuard;
+
 enum class SyncPhase : uint8_t {
     Idle,
     Hashing,
@@ -34,26 +38,76 @@ class KosyncSyncCoordinator {
 public:
     explicit KosyncSyncCoordinator(BookReader& reader);
 
-    // Initiate sync: builds client per-call from current Settings, pulls,
-    // checks divergence. Returns SyncResult with hasConflict=true on conflict
-    // (leaves busy flag set; caller must call resolveConflict or clearBusy).
+    // Out-of-line destructor required because unique_ptr<WifiSyncGuard> uses a
+    // forward-declared type — the complete type must be visible at destruction site.
+    ~KosyncSyncCoordinator();
+
+    // ─── Legacy synchronous API (deprecated, removed in WP-10 Task 8) ──
+    //
+    // Wird waehrend der Migration noch von HTTP-Callern verwendet (heute
+    // keiner). Neue Aufrufer MUESSEN beginSync()/tick() benutzen.
     SyncResult syncNow();
 
-    // Called after user picks in conflict dialog.
-    // keepLocal=true  → PUSH local progress unchanged.
-    // keepLocal=false → applyRemoteProgress on BookReader, then PUSH the new local.
+    // ─── Conflict resolution (unveraendert) ────────────────────────────
     SyncResult resolveConflict(bool keepLocal);
 
     // Called from conflict dialog cancel path. Releases busy flag, no I/O.
-    void clearBusy();
+    void       clearBusy();
 
-    bool isBusy() const { return busy_.load(); }
+    bool       isBusy() const { return busy_.load(); }
+
+    // ─── Phase-based API (WP-10) ───────────────────────────────────────
+
+    // Startet eine neue Sync-Sequenz. Returns false wenn schon busy;
+    // outToast wird dann mit dem User-sichtbaren Grund befuellt
+    // ("Sync laeuft bereits"). Beim Erfolg ist phase_ == Hashing und
+    // der Dispatcher muss state auf STATE_SYNC_PROGRESS setzen.
+    bool beginSync(String& outToast);
+
+    // Pro UI-Frame aufgerufen. Treibt die Phasen-Sequenz voran.
+    // Idempotent in terminalen Phasen (Done, Failed, Cancelled,
+    // AwaitConflict): tick() darf dort beliebig oft erneut gerufen
+    // werden, ohne Seiteneffekte.
+    // Returns true wenn sich die Phase in diesem Aufruf geaendert hat
+    // (Dispatcher nutzt das als Redraw-Hint).
+    bool tick();
+
+    SyncPhase  currentPhase() const { return phase_; }
+
+    // Gueltig wenn phase_ ∈ {Done, Failed, Cancelled, AwaitConflict}.
+    // Liest pendingResult_ aus und setzt phase_ auf Idle zurueck —
+    // genau einmal pro Sync-Sequenz aufrufen.
+    SyncResult takeResult();
+
+    // Atomar gesetzt; vom naechsten tick() respektiert.
+    void requestCancel() { cancelRequested_.store(true); }
+
+    // Synchroner Teardown vor enterDeepSleep(). Idempotent.
+    void cancelIfBusy();
 
 private:
-    BookReader& reader_;
-    std::atomic<bool> busy_{false};
-    KosyncProgress pendingRemote_{};   // populated when entering AwaitConflict
-    KosyncProgress pendingLocal_{};    // snapshot at sync-trigger time
+    // ─── Internal helpers (Task 3) ─────────────────────────────────────
+    void enterPhase(SyncPhase next);
+    void runHashing();
+    void runWaitingWifi();
+    void runPulling();
+    void runPushing();
+    void finishWithToast(const String& toast, bool success);
+    void finishConflict();
+
+    BookReader&                    reader_;
+    std::atomic<bool>              busy_{false};
+    std::atomic<bool>              cancelRequested_{false};
+    SyncPhase                      phase_       = SyncPhase::Idle;
+    SyncPhase                      lastPhase_   = SyncPhase::Idle;  // fuer tick()-changed-Hint
+    KosyncProgress                 pendingLocal_{};
+    KosyncProgress                 pendingRemote_{};
+    String                         hash_;
+    SyncResult                     pendingResult_{};
+    uint32_t                       wifiBudgetStartMs_ = 0;
+    bool                           freshSync_         = false;  // 404-Pfad merken
+    std::unique_ptr<WifiSyncGuard> wifi_;
+    std::unique_ptr<KosyncClient>  client_;
 };
 
 // Lazy-init accessors (file-scope storage in kosync_sync.cpp).

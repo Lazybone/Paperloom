@@ -13,11 +13,8 @@
 #include "reader.h"
 #include "settings.h"
 
-// ─── File-scope storage for lazy-init accessors ─────────────────────────
-namespace {
-
-std::unique_ptr<KosyncSyncCoordinator> g_coordinator;
-
+// ─── WifiSyncGuard ──────────────────────────────────────────────────────
+//
 // Stateful poll-based WiFi guard. Replaces the old blocking RAII guard.
 //
 // Usage:
@@ -28,6 +25,9 @@ std::unique_ptr<KosyncSyncCoordinator> g_coordinator;
 //
 // If WiFi is already connected (e.g. user is in WiFi-Upload screen), begin()
 // returns AlreadyConnected and release() is a no-op (we don't own the radio).
+//
+// NOTE: NOT in an anonymous namespace so the forward declaration in the
+// header resolves to the same type (C++ ODR requires identical linkage).
 class WifiSyncGuard {
 public:
     enum class BeginResult { Started, NoCredentials, AlreadyConnected };
@@ -111,6 +111,11 @@ private:
     bool     weBroughtUp_    = false;
     bool     released_       = false;
 };
+
+// ─── File-scope storage for lazy-init accessors ─────────────────────────
+namespace {
+
+std::unique_ptr<KosyncSyncCoordinator> g_coordinator;
 
 // Divergence thresholds. Local-vs-remote progress is considered convergent
 // (no conflict dialog) when chapter matches AND the page delta is within
@@ -512,4 +517,223 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
 
 void KosyncSyncCoordinator::clearBusy() {
     busy_.store(false);
+}
+
+// ─── WP-10 phase-based API ──────────────────────────────────────────────
+
+KosyncSyncCoordinator::~KosyncSyncCoordinator() = default;
+
+void KosyncSyncCoordinator::enterPhase(SyncPhase next) {
+    phase_ = next;
+}
+
+bool KosyncSyncCoordinator::beginSync(String& outToast) {
+    bool expected = false;
+    if (!busy_.compare_exchange_strong(expected, true)) {
+        outToast = "Sync läuft bereits";
+        return false;
+    }
+    cancelRequested_.store(false);
+    pendingLocal_      = KosyncProgress{};
+    pendingRemote_     = KosyncProgress{};
+    pendingResult_     = SyncResult{};
+    hash_              = String();
+    freshSync_         = false;
+    wifiBudgetStartMs_ = 0;
+    wifi_.reset();
+    client_.reset();
+    enterPhase(SyncPhase::Hashing);
+    lastPhase_ = SyncPhase::Idle;   // erster tick() registriert Phasenwechsel
+    return true;
+}
+
+bool KosyncSyncCoordinator::tick() {
+    // Cancel hat hoechste Prioritaet — terminal stoppen, falls in einer
+    // unterbrechbaren Phase.
+    if (cancelRequested_.load() &&
+        phase_ != SyncPhase::AwaitConflict &&
+        phase_ != SyncPhase::Done &&
+        phase_ != SyncPhase::Failed &&
+        phase_ != SyncPhase::Cancelled) {
+        Serial.printf("[kosync_sync] sync: cancelled in phase=%d\n",
+                      static_cast<int>(phase_));
+        pendingResult_.success     = false;
+        pendingResult_.hasConflict = false;
+        pendingResult_.toast       = "Sync abgebrochen";
+        if (wifi_) wifi_->release();
+        client_.reset();
+        busy_.store(false);
+        enterPhase(SyncPhase::Cancelled);
+    } else {
+        switch (phase_) {
+            case SyncPhase::Idle:          break;
+            case SyncPhase::Hashing:       runHashing();      break;
+            case SyncPhase::WaitingWifi:   runWaitingWifi();  break;
+            case SyncPhase::Pulling:       runPulling();      break;
+            case SyncPhase::Pushing:       runPushing();      break;
+            case SyncPhase::AwaitConflict: break;
+            case SyncPhase::Done:          break;
+            case SyncPhase::Failed:        break;
+            case SyncPhase::Cancelled:     break;
+        }
+    }
+
+    const bool changed = (phase_ != lastPhase_);
+    lastPhase_ = phase_;
+    return changed;
+}
+
+void KosyncSyncCoordinator::runHashing() {
+    hash_ = reader_.getDocumentHash();
+    if (hash_.length() != 32) {
+        Serial.printf("[kosync_sync] sync: bad doc hash (len=%u)\n",
+                      static_cast<unsigned>(hash_.length()));
+        finishWithToast("Sync fehlgeschlagen: Serverfehler", false);
+        return;
+    }
+    const Settings& s = settings_get();
+    if (s.kosyncServer.length() == 0 || s.kosyncUser.length() == 0 ||
+        s.kosyncKey.length() != 32 || s.kosyncCredentialsInvalid) {
+        Serial.printf("[kosync_sync] sync: not configured\n");
+        finishWithToast("KoSync nicht konfiguriert", false);
+        return;
+    }
+    wifi_.reset(new WifiSyncGuard(s));
+    auto br = wifi_->begin();
+    if (br == WifiSyncGuard::BeginResult::NoCredentials) {
+        Serial.printf("[kosync_sync] sync: no WiFi creds\n");
+        finishWithToast("WLAN nicht konfiguriert", false);
+        return;
+    }
+    wifiBudgetStartMs_ = millis();
+    enterPhase(SyncPhase::WaitingWifi);
+}
+
+void KosyncSyncCoordinator::runWaitingWifi() {
+    auto pr = wifi_->poll();
+    if (pr == WifiSyncGuard::PollResult::Connected) {
+        const Settings& s = settings_get();
+        client_.reset(new KosyncClient(s.kosyncServer, s.kosyncUser, s.kosyncKey));
+        snapshot_local(reader_, s, pendingLocal_);
+        enterPhase(SyncPhase::Pulling);
+        return;
+    }
+    if (pr == WifiSyncGuard::PollResult::Failed) {
+        Serial.printf("[kosync_sync] sync: WiFi connect failed\n");
+        finishWithToast("Sync fehlgeschlagen: Kein WLAN", false);
+        return;
+    }
+    if (millis() - wifiBudgetStartMs_ >= 10000) {
+        Serial.printf("[kosync_sync] sync: WiFi budget expired\n");
+        finishWithToast("Sync fehlgeschlagen: Kein WLAN", false);
+        return;
+    }
+    // sonst: in WaitingWifi bleiben, nächster tick versucht erneut
+}
+
+void KosyncSyncCoordinator::runPulling() {
+    String err;
+    int status = client_->pullProgress(hash_, pendingRemote_, err);
+
+    if (status == 404) {
+        freshSync_ = true;
+        enterPhase(SyncPhase::Pushing);
+        return;
+    }
+    if (status == 401 || status == 403) {
+        Serial.printf("[kosync_sync] sync: pull auth failed status=%d\n", status);
+        finishWithToast("Sync fehlgeschlagen: Login ungültig", false);
+        return;
+    }
+    if (status == 0) {
+        Serial.printf("[kosync_sync] sync: pull transport error\n");
+        String toast = err.length()
+                           ? String("Sync fehlgeschlagen: ") + err
+                           : String("Sync fehlgeschlagen: Server nicht erreichbar");
+        finishWithToast(toast, false);
+        return;
+    }
+    if (status != 200) {
+        Serial.printf("[kosync_sync] sync: pull server error status=%d\n", status);
+        finishWithToast("Sync fehlgeschlagen: Serverfehler", false);
+        return;
+    }
+    if (!bounds_ok(pendingRemote_)) {
+        Serial.printf("[kosync_sync] OutOfBounds: percentage=%.4f, timestamp=%u\n",
+                      pendingRemote_.percentage, pendingRemote_.timestamp);
+        finishWithToast("Sync fehlgeschlagen: Serverfehler", false);
+        return;
+    }
+    pendingRemote_.chapter = pendingLocal_.chapter;
+    pendingRemote_.page    = pendingLocal_.page;
+    parse_paperloom_progress(pendingRemote_.progress,
+                             pendingRemote_.chapter, pendingRemote_.page);
+
+    const bool divergent =
+        (pendingLocal_.chapter != pendingRemote_.chapter) ||
+        (abs(pendingLocal_.page - pendingRemote_.page) > kPageDeltaThreshold) ||
+        (fabsf(pendingLocal_.percentage - pendingRemote_.percentage) >
+         kPercentageDeltaThreshold);
+
+    if (divergent) {
+        finishConflict();
+        return;
+    }
+    enterPhase(SyncPhase::Pushing);
+}
+
+void KosyncSyncCoordinator::runPushing() {
+    String err;
+    int ps = client_->pushProgress(hash_, pendingLocal_, err);
+    const char* successMsg = freshSync_ ? "Sync ok (neu)" : "Sync ok";
+    String toast;
+    bool ok = push_status_to_toast(ps, err, toast, successMsg);
+    if (ok) {
+        reader_.setLastSyncTimestamp(static_cast<uint32_t>(time(nullptr)));
+        pendingResult_.local = pendingLocal_;
+    } else {
+        Serial.printf("[kosync_sync] sync: push failed status=%d\n", ps);
+    }
+    finishWithToast(toast, ok);
+}
+
+void KosyncSyncCoordinator::finishWithToast(const String& toast, bool success) {
+    pendingResult_.success     = success;
+    pendingResult_.hasConflict = false;
+    pendingResult_.toast       = toast;
+    if (success) pendingResult_.local = pendingLocal_;
+    if (wifi_) wifi_->release();
+    client_.reset();
+    busy_.store(false);
+    enterPhase(success ? SyncPhase::Done : SyncPhase::Failed);
+}
+
+void KosyncSyncCoordinator::finishConflict() {
+    pendingResult_.success     = false;
+    pendingResult_.hasConflict = true;
+    pendingResult_.toast       = "";
+    pendingResult_.local       = pendingLocal_;
+    pendingResult_.remote      = pendingRemote_;
+    // wifi_ + busy_ bleiben aktiv — resolveConflict() reused beide.
+    enterPhase(SyncPhase::AwaitConflict);
+}
+
+SyncResult KosyncSyncCoordinator::takeResult() {
+    SyncResult r = pendingResult_;
+    pendingResult_ = SyncResult{};
+    enterPhase(SyncPhase::Idle);
+    lastPhase_ = SyncPhase::Idle;
+    return r;
+}
+
+void KosyncSyncCoordinator::cancelIfBusy() {
+    if (!busy_.load()) return;
+    Serial.printf("[kosync_sync] cancelIfBusy: phase=%d\n",
+                  static_cast<int>(phase_));
+    cancelRequested_.store(true);
+    if (wifi_) wifi_->release();
+    client_.reset();
+    busy_.store(false);
+    enterPhase(SyncPhase::Idle);
+    lastPhase_ = SyncPhase::Idle;
 }
