@@ -457,8 +457,8 @@ void ui_reader_draw(BookReader& reader, ReaderRefreshState& refresh) {
         // the three WakeFull zone marks we set above. Instead we drive
         // display_flush() directly — WakeFull on any dirty zone routes
         // the whole frame through the GC16 6-cycle clear path inside
-        // display_flush() and resets _framesSinceFullRefresh to 0
-        // exactly like display_force_full_refresh() would.
+        // display_flush() and resets every per-zone anti-ghost counter
+        // to 0 exactly like display_force_full_refresh() would.
         display_flush();
         refresh.forceFullRefresh = false;
         refresh.pageTurnsSinceFull = 0;
@@ -975,7 +975,7 @@ AppState ui_reader_toc_touch(int x, int y, BookReader& reader,
             // the 6-cycle clear, making it look like a freeze/wedge.
             //
             // Intent: AntiGhost (GC16 full-clear) — this both renders the splash
-            // cleanly and resets _framesSinceFullRefresh to 0 inside
+            // cleanly and resets every per-zone anti-ghost counter to 0 inside
             // display_flush(). Without that reset the subsequent
             // s_overlayDismissed reader-redraw in ui_reader_draw() would tick the
             // partial-update counter a second time for the same logical user
@@ -1118,8 +1118,8 @@ AppState ui_reader_bookmarks_touch(int x, int y, BookReader& reader,
                 // is working (ZIP decompression can take several seconds).
                 //
                 // Intent: AntiGhost (GC16 full-clear) — same rationale as the
-                // TOC chapter-jump splash above: resets _framesSinceFullRefresh
-                // to 0 so the s_overlayDismissed reader-redraw that follows
+                // TOC chapter-jump splash above: resets every per-zone anti-ghost
+                // counter to 0 so the s_overlayDismissed reader-redraw that follows
                 // does not double-tick the partial-update counter for one
                 // logical user action.
                 display_begin_frame();

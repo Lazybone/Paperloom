@@ -137,12 +137,18 @@ static_assert(PORTRAIT_W == 540,
 static_assert(PORTRAIT_H == 960,
               "Zone rects assume PORTRAIT_H == 960");
 
-// Anti-ghost cadence: after this many consecutive partial frames, the next
-// flush is auto-upgraded to a full GC16 refresh (and the counter resets).
-// The threshold itself lives in include/config.h as REFRESH_INTERVAL_READER
-// so it can be tuned without editing display code; 6 matches the documented
-// reader page-turn budget for ED047TC1 + VCOM 2400 mV.
-static int _framesSinceFullRefresh = 0;
+// Anti-ghost cadence is tracked per zone. Each zone hits its own threshold
+// and runs GC16 on its own rect — header glyph-ticks no longer drag the
+// body's ghost budget. The full-screen clear runs only when Zone::FullScreen
+// itself escalates, or when every dirty zone escalates in the same frame.
+// Thresholds live in include/config.h: REFRESH_INTERVAL_READER (body/footer/
+// overlay/full-screen) and REFRESH_INTERVAL_HEADER (header).
+static int _framesSincePerZone[(int)Zone::_Count] = {0};
+
+static int refresh_threshold_for_zone(Zone z) {
+    return (z == Zone::ReaderHeader) ? REFRESH_INTERVAL_HEADER
+                                     : REFRESH_INTERVAL_READER;
+}
 
 // Power batching: _lastPoweroffMs is recorded on every flush poweroff so a
 // future backend variant can implement a "hold rails warm" mode and skip
@@ -401,9 +407,12 @@ void display_clear() {
     epd_be_clear();
     epd_be_poweroff_all();
     _lastPoweroffMs = millis();
-    // Panel is now physically white; reset anti-ghost counter so the
-    // next frame doesn't immediately escalate to a forced full refresh.
-    _framesSinceFullRefresh = 0;
+    // Panel is now physically white; reset every per-zone anti-ghost
+    // counter so the next frame doesn't immediately escalate to a forced
+    // full refresh.
+    for (int i = 0; i < (int)Zone::_Count; i++) {
+        _framesSincePerZone[i] = 0;
+    }
 }
 
 void display_fill_screen(uint8_t gray4) {
@@ -552,7 +561,11 @@ void display_update_sleep() {
     epd_be_draw_grayscale_image(epd_be_full_screen(), _lfb);
     epd_be_poweroff_all();  // zero all control bits for clean power state
     _lastPoweroffMs = millis();
-    _framesSinceFullRefresh = 0;
+    // Sleep image is a clean GC16 over the whole panel — reset every
+    // per-zone anti-ghost counter.
+    for (int i = 0; i < (int)Zone::_Count; i++) {
+        _framesSincePerZone[i] = 0;
+    }
 }
 
 // ─── Legacy shims onto the new intent API ─────────────────────────────
@@ -819,18 +832,37 @@ void display_flush() {
 
     const unsigned long _flush_t0 = millis();
 
-    // Anti-ghost auto-upgrade: if this frame would push us at or beyond
-    // the threshold, escalate any dirty reader zone (and the FullScreen
-    // zone, if dirty) to AntiGhost so the full-clear path runs.
-    if (!isFullRefresh &&
-        _framesSinceFullRefresh + 1 >= REFRESH_INTERVAL_READER) {
-        for (int i = (int)Zone::ReaderHeader; i <= (int)Zone::ReaderFooter; i++) {
-            if (_zones[i].dirty) _zones[i].intent = ChangeKind::AntiGhost;
+    // Per-zone escalation. Each dirty zone independently decides whether
+    // its counter has hit its threshold; if yes, that zone's intent is
+    // upgraded to AntiGhost (→ MODE_GC16 on the zone's rect only). The
+    // full-clear path runs only when Zone::FullScreen is the one that
+    // escalated (it genuinely covers the whole panel), or when MULTIPLE
+    // dirty zones escalated in the same flush (cheaper to do one full
+    // clear than two-plus per-zone GC16 cycles).
+    if (!isFullRefresh) {
+        int dirty_count = 0;
+        int escalated_count = 0;
+        for (int i = 0; i < (int)Zone::_Count; i++) {
+            if (!_zones[i].dirty) continue;
+            dirty_count++;
+            const Zone z = (Zone)i;
+            if (_framesSincePerZone[i] + 1 >= refresh_threshold_for_zone(z)) {
+                _zones[i].intent = ChangeKind::AntiGhost;
+                escalated_count++;
+                if (z == Zone::FullScreen) {
+                    isFullRefresh = true;
+                }
+            }
         }
-        if (_zones[(int)Zone::FullScreen].dirty) {
-            _zones[(int)Zone::FullScreen].intent = ChangeKind::AntiGhost;
+        // CRITICAL: escalated_count > 1, NOT > 0. The whole point of WP-E
+        // is to keep a single zone's anti-ghost cost local to that zone —
+        // a lone header escalation must run GC16 on the header rect only,
+        // not on the entire panel. Only when 2+ zones escalate in the same
+        // flush does a single full-clear become cheaper than two-plus
+        // per-zone GC16 calls.
+        if (escalated_count > 1 && escalated_count == dirty_count) {
+            isFullRefresh = true;
         }
-        isFullRefresh = true;
     }
 
     // Read the temperature once per frame — cached at the backend, so a
@@ -916,10 +948,12 @@ void display_flush() {
         if (_zones[i].dirty) _flush_dirty++;
     }
     const unsigned long _flush_t1 = millis();
-    Serial.printf("[FLUSH] zones=%d full=%d frames_since_full=%d ms=%lu\n",
+    Serial.printf("[FLUSH] zones=%d full=%d hdr=%d body=%d foot=%d ms=%lu\n",
                   _flush_dirty,
                   isFullRefresh ? 1 : 0,
-                  _framesSinceFullRefresh,
+                  _framesSincePerZone[(int)Zone::ReaderHeader],
+                  _framesSincePerZone[(int)Zone::ReaderBody],
+                  _framesSincePerZone[(int)Zone::ReaderFooter],
                   _flush_t1 - _flush_t0);
 #else
     (void)_flush_t0;
@@ -937,9 +971,21 @@ void display_flush() {
 
     // Counter management — update exactly once per frame, at the end.
     if (isFullRefresh) {
-        _framesSinceFullRefresh = 0;
+        // Full clear refreshed every pixel — reset every zone's counter.
+        for (int i = 0; i < (int)Zone::_Count; i++) {
+            _framesSincePerZone[i] = 0;
+        }
     } else {
-        _framesSinceFullRefresh++;
+        // Per-zone path: each dirty zone advances its own counter; zones
+        // that ran AntiGhost reset (their pixels were just GC16-cleared).
+        for (int i = 0; i < (int)Zone::_Count; i++) {
+            if (!_zones[i].dirty) continue;
+            if (_zones[i].intent == ChangeKind::AntiGhost) {
+                _framesSincePerZone[i] = 0;
+            } else {
+                _framesSincePerZone[i]++;
+            }
+        }
     }
 
     // One-shot reset of the overlay rect so it doesn't leak into the

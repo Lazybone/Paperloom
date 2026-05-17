@@ -151,3 +151,12 @@ static const uint8_t LINE_SPACING_PCT[LINE_SPACING_LEVEL_COUNT] = {100, 110, 120
 #ifndef REFRESH_INTERVAL_READER
 #define REFRESH_INTERVAL_READER 6
 #endif
+
+// Anti-ghost threshold for the header zone alone (battery / title ticks).
+// Header changes are tiny glyph swaps (1–3 chars) that ghost minimally;
+// 30 lets the battery indicator flick for ~30 minutes (≈1 tick/min) before
+// the header rect alone does a GC16 clean. Body/footer/overlay/full-screen
+// stay on REFRESH_INTERVAL_READER.
+#ifndef REFRESH_INTERVAL_HEADER
+#define REFRESH_INTERVAL_HEADER 30
+#endif

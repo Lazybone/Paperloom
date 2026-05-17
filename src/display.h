@@ -135,7 +135,7 @@ void display_flush();
 // the zone marks would be silently discarded. Drive display_flush()
 // directly instead and mark at least one zone with ChangeKind::WakeFull
 // (or AntiGhost / SleepImage) — the full-clear path inside display_flush()
-// will run and reset _framesSinceFullRefresh to 0 just like this helper.
+// will run and reset every per-zone anti-ghost counter to 0 just like this helper.
 void display_force_full_refresh();
 
 // Font family identifiers — keep in sync with settings.h's fontFamily and
