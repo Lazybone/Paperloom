@@ -16,7 +16,6 @@
 #include "ui_reader_sync_progress.h"
 
 #include "ui_common.h"
-#include "ui_toast.h"
 #include "config.h"
 #include "../display.h"
 #include "../kosync_sync.h"
@@ -36,7 +35,6 @@ constexpr int ROW_LIST_TOP   = BODY_TOP + 30;
 constexpr int ICON_SIZE      = 28;
 constexpr int ICON_LEFT      = MARGIN_X + 10;
 constexpr int LABEL_LEFT     = ICON_LEFT + ICON_SIZE + 20;
-constexpr int DETAIL_DY      = 30;  // detail line offset below label
 constexpr int STATUS_LINE_Y  = FOOTER_TOP - 28;
 
 constexpr uint8_t COLOR_FRAME_PENDING = 8;   // grey rect frame
