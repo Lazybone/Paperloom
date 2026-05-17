@@ -703,6 +703,7 @@ static int changekind_rank(ChangeKind k) {
         case ChangeKind::TextReflow:       return 2;
         case ChangeKind::GlyphTick:        return 1;
         case ChangeKind::HighlightToggle:  return 1;
+        case ChangeKind::TapPulse:         return 1;
     }
     return 0;
 }
@@ -712,10 +713,17 @@ static int changekind_rank(ChangeKind k) {
 // numeric values (see EPD_MODE_* constants near the top of this file) to
 // avoid pulling <epdiy.h> into display.cpp, which would clash with our
 // extern-C EpdRect typedef in epd_backend.h.
+//
+// Map ChangeKind → epdiy EpdDrawMode integer. TapPulse intentionally uses
+// MODE_DU4 (4-grey, ~50–80 ms) and NOT MODE_DU (2-tone, ~100 ms). DU is
+// slower than DU4 on this panel because the monochrome waveform still has
+// to run all its phases — there is no shortcut for 2-tone on ED047TC1.
+// DU4 also looks correct for anti-aliased glyphs; pure DU thresholds them.
 static int changekind_to_mode(ChangeKind k) {
     switch (k) {
         case ChangeKind::GlyphTick:        return EPD_MODE_DU4;
         case ChangeKind::HighlightToggle:  return EPD_MODE_DU4;
+        case ChangeKind::TapPulse:         return EPD_MODE_DU4;
         case ChangeKind::TextReflow:       return EPD_MODE_GL16;
         case ChangeKind::StructuralRedraw: return EPD_MODE_GL16;
         case ChangeKind::WakeFull:         return EPD_MODE_GC16;

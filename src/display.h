@@ -79,6 +79,7 @@ int  display_height();
 enum class ChangeKind : uint8_t {
     GlyphTick,         // Battery icon redraw, clock tick    → DU4 (fast 4-grey)
     HighlightToggle,   // Button / row selection             → DU4
+    TapPulse,          // Single-shot press feedback         → DU4 (same 4-grey, ~50–80 ms)
     TextReflow,        // Page-turn body, footer text        → GL16 (non-flashing)
     StructuralRedraw,  // Tab / screen change, overlay open  → GL16
     WakeFull,          // Wake from sleep — counter reset    → GC16 full + clear
