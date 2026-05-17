@@ -756,16 +756,14 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
 }
 
 void ui_reader_goto_draw(BookReader& reader) {
-    // Go-to picker is a full-screen overlay (header + value + nudge
-    // buttons + bottom bar). Was display_update_medium() → 6-cycle
-    // GC16 clear via the WP-0.2 shim (visible flash on every nudge tap
-    // and on open). Migrated to Zone::FullScreen + StructuralRedraw,
-    // which is GL16 non-flashing. The close paths set s_overlayDismissed
-    // so the reader's chrome returns cleanly.
-    display_begin_frame();
-
+    // Go-to picker is a tall overlay (header + value + nudge buttons +
+    // bottom bar). Was display_update_medium() → 6-cycle GC16 clear via
+    // the WP-0.2 shim (visible flash on every nudge tap and on open).
+    // Migrated to Zone::Overlay + StructuralRedraw, which is GL16
+    // non-flashing. The close paths set s_overlayDismissed so the
+    // reader's chrome returns cleanly.
+    tall_overlay_begin();
     display_set_font_size(2);  // chrome always in Inter
-    display_fill_screen(15);
     drawHeader("Go to...", true);
 
     String subtitle = s_gotoPercentMode ? "Percentage" : "Approximate page";
@@ -796,8 +794,7 @@ void ui_reader_goto_draw(BookReader& reader) {
     display_draw_text((W - gw) / 2, 520, goLbl, 4);
 
     drawBottomBar("[ Back to Reading ]");
-    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
-    display_flush();
+    tall_overlay_flush();
     setNeedsRedraw(false);
 }
 
