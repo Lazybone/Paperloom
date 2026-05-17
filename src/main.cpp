@@ -36,6 +36,7 @@
 #include <esp_sleep.h>
 #include <esp_task_wdt.h>
 #include <driver/gpio.h>
+#include <esp_heap_caps.h>
 
 // ─── App State ──────────────────────────────────────────────────────
 static AppState       appState = STATE_BOOT;
@@ -1352,9 +1353,45 @@ void button_action_execute(uint8_t action) {
     }
 }
 
+// ─── Heap diagnostics ───────────────────────────────────────────────
+static const char* appstate_short_name(AppState s) {
+    switch (s) {
+        case STATE_BOOT:            return "BOOT";
+        case STATE_LIBRARY:         return "LIB";
+        case STATE_READER:          return "READ";
+        case STATE_WIFI:            return "WIFI";
+        case STATE_MENU:            return "MENU";
+        case STATE_GOTO:            return "GOTO";
+        case STATE_TOC:             return "TOC";
+        case STATE_BOOKMARKS:       return "BMKS";
+        case STATE_SETTINGS:        return "SETT";
+        case STATE_OTA_CHECK:       return "OTA";
+        case STATE_WIFI_SETUP:      return "WIFI_S";
+        case STATE_WIFI_KEYBOARD:   return "WIFI_KB";
+        case STATE_KOSYNC_SETUP:    return "KSET";
+        case STATE_SYNC_CONFLICT:   return "SYNC_C";
+        case STATE_SYNC_PROGRESS:   return "SYNC_P";
+        case STATE_SLEEP_REQUEST:   return "SLEEP_R";
+    }
+    return "?";
+}
+
+static void log_heap_on_state_change(AppState s) {
+    static AppState lastLogged = (AppState)-1;  // force first log
+    if (s == lastLogged) return;
+    lastLogged = s;
+    Serial.printf("[heap] state=%s free=%u dma_largest=%u\n",
+                  appstate_short_name(s),
+                  (unsigned)ESP.getFreeHeap(),
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+}
+
 void loop() {
     // ── Serial console (USB-CDC credential setup, always) ────────────
     serial_console_tick();
+
+    // ── Heap diagnostics (per-tick) ──────────────────────────────────
+    log_heap_on_state_change(appState);
 
     // ── Toast cooldown (per-tick, always) ────────────────────────────
     ui_toast_tick();
