@@ -4,6 +4,65 @@ All notable changes to this firmware will be documented in this file.
 
 ## Unreleased
 
+## v0.2.5 — 2026-05-17
+
+### Added
+- **`ChangeKind::TapPulse`** intent in the partial-update API, mapped to
+  `MODE_DU4` (4-grey, ~50–80 ms). Reserved for future tap-feedback
+  consumers; not wired into the Library today (no existing tap
+  animation to migrate).
+- **Per-zone anti-ghost counter** (`_framesSincePerZone[]`). Each Reader
+  zone now tracks its own frames-since-last-full and escalates to a
+  GC16 clean of its own rect only — header glyph-ticks no longer drag
+  the body's ghost budget into a panel-wide refresh. Threshold for the
+  header zone alone is the new `REFRESH_INTERVAL_HEADER` (default 30);
+  body/footer stay on `REFRESH_INTERVAL_READER`. A panel-wide full
+  clear runs only when `Zone::FullScreen` itself escalates or when 2+
+  dirty zones escalate simultaneously.
+- **Persistent landscape rotation buffer** (`_rotation_buf`, 256 KB
+  PSRAM, allocated once in `display_init`). Removes the per-flush
+  `malloc`/`free` that fragmented the heap on rapid page-turns and
+  saves ~5–10 ms per multi-zone flush. Falls back to per-flush malloc
+  with a `WARN` log if PSRAM is exhausted at boot.
+- **`flushSettingsRow` helper** in `ui_settings.cpp` for per-row
+  partial flushes via `Zone::Overlay`. Pilot-wired to the Page Numbers
+  toggle; broader per-row migration is deferred (would require
+  factoring row-drawing out of `ui_settings_draw`).
+- **`tall_overlay_begin/_flush` helpers** in `ui_reader.cpp` for body-
+  only overlays (header-bottom y=66 to footer-top y=910, height 844).
+  Used by the menu overlay; documents the rotate-only-the-rect bounds
+  contract so a second consumer (currently none) can adopt it safely.
+
+### Changed
+- **Menu overlay (`ui_reader_menu_draw`)** now uses `Zone::Overlay`
+  with the body-only rect instead of `Zone::FullScreen`. Reader
+  header and footer chrome stay visible during the menu — saves
+  ~80–150 ms per menu open/close. TOC/Bookmarks/GoTo/Picker overlays
+  intentionally stay on `Zone::FullScreen` because they paint their
+  own `drawHeader`/`drawBottomBar` chrome at y<66 and y>910 that the
+  body-only rect would hide.
+- **Overlay-rect-empty diagnostic** in `display_flush` is now
+  unconditional (previously gated behind `DISPLAY_FLUSH_LOG`). Catches
+  a missed `display_set_overlay_rect()` immediately on serial.
+- **Flush-log line** prints per-zone counters
+  (`hdr=%d body=%d foot=%d`) in place of the single
+  `frames_since_full=%d`.
+
+### Removed
+- **Deprecated `display_update_*` shims** — `display_update`,
+  `display_update_medium`, `display_update_fast`,
+  `display_update_partial`, `display_update_mode`,
+  `display_update_reader_body`. All callers had already migrated to
+  the intent API. `display_update_sleep` (terminal sleep-image latch)
+  stays. `needsRedraw` flag in `main.cpp` also stays — kept as an
+  atomic signal for a future Touch-ISR migration.
+
+### Notes
+- The plan and supporting analysis live in
+  `docs/superpowers/plans/2026-05-17-fast-partial-refresh.md`
+  alongside the t5s3-analysis reference docs and the round-1/round-2
+  reviews under `docs/superpowers/specs/`.
+
 ## v0.2.4 — 2026-05-13
 
 ### Added
