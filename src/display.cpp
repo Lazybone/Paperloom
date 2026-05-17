@@ -1003,9 +1003,6 @@ int display_height() {
 }
 
 void display_set_font_size(int sizeLevel) {
-    Serial.printf("[dma-trace] set_font_size dma_free=%u dma_largest=%u\n",
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
     // UI font selector — chrome (header, footer, menus, library list,
     // settings) always renders in Inter regardless of the reader-family
     // setting.  Reader text uses display_set_font(level, family) instead.
@@ -1022,9 +1019,6 @@ void display_set_font_size(int sizeLevel) {
 }
 
 void display_set_font(int sizeLevel, uint8_t family) {
-    Serial.printf("[dma-trace] set_font dma_free=%u dma_largest=%u\n",
-                  (unsigned)heap_caps_get_free_size(MALLOC_CAP_DMA),
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
     if (sizeLevel < 0) sizeLevel = 0;
     if (sizeLevel >= FONT_SIZE_LEVEL_COUNT) sizeLevel = FONT_SIZE_LEVEL_COUNT - 1;
     // Settings storage is uint8_t; clamp before indexing the lookup table

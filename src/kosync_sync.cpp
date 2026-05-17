@@ -127,6 +127,50 @@ private:
     bool     released_       = false;
 };
 
+// ─── Plan G: SSL DMA-cap reserve ───────────────────────────────────────
+//
+// mbedtls's SSL record buffer (CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=16384)
+// is allocated once per SSL session from internal DMA-cap RAM. From the
+// reader-context, the DMA-heap is fragmented enough that no 16 KB
+// contiguous block exists. We pre-allocate 18 KB at boot (when the heap
+// is still pristine), keep it pinned, and free it just before the SSL
+// handshake — guaranteeing mbedtls finds its block.
+//
+// Lifecycle:
+//   - ssl_reserve_init() at end of setup() — alloc 18 KB
+//   - ssl_reserve_release() in runPulling, before client_->pullProgress()
+//   - ssl_reserve_acquire() in finishWithToast / finishConflict /
+//     cancel paths / end of resolveConflict — re-alloc 18 KB
+//   - Both ssl_reserve_release and ssl_reserve_acquire are idempotent
+
+constexpr size_t kSslReserveBytes = 18 * 1024;
+static uint8_t* g_ssl_reserve = nullptr;
+
+static void ssl_reserve_release() {
+    if (g_ssl_reserve == nullptr) return;
+    Serial.printf("[ssl-reserve] release %u bytes (dma_largest before: %u)\n",
+                  (unsigned)kSslReserveBytes,
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    heap_caps_free(g_ssl_reserve);
+    g_ssl_reserve = nullptr;
+    Serial.printf("[ssl-reserve] release done (dma_largest after: %u)\n",
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+}
+
+static bool ssl_reserve_acquire() {
+    if (g_ssl_reserve != nullptr) return true;  // already held
+    g_ssl_reserve = (uint8_t*)heap_caps_malloc(kSslReserveBytes, MALLOC_CAP_DMA);
+    if (g_ssl_reserve == nullptr) {
+        Serial.printf("[ssl-reserve] acquire FAILED (dma_largest=%u)\n",
+                      (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+        return false;
+    }
+    Serial.printf("[ssl-reserve] acquire %u bytes ok (dma_largest=%u)\n",
+                  (unsigned)kSslReserveBytes,
+                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
+    return true;
+}
+
 // ─── File-scope storage for lazy-init accessors ─────────────────────────
 namespace {
 
@@ -334,6 +378,10 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
     }
     // br == AlreadyConnected → fall through, no wait needed.
 
+    // Plan G: release the DMA-cap reserve so mbedtls finds its 16 KB
+    // contiguous block for the SSL handshake in pushProgress() below.
+    ssl_reserve_release();
+
     KosyncClient client(s.kosyncServer, s.kosyncUser, s.kosyncKey);
 
     bool saveFailed = false;
@@ -378,6 +426,8 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
     // so DMA-capable heap is freed immediately for the next page-paint.
     if (wifi_) wifi_->release();
     wifi_.reset();
+    // Plan G: re-acquire reserve after resolveConflict's push is done.
+    ssl_reserve_acquire();
     return r;
 }
 
@@ -431,6 +481,7 @@ bool KosyncSyncCoordinator::tick() {
         client_.reset();
         busy_.store(false);
         reader_.restoreParserAfterSync();
+        ssl_reserve_acquire();
         enterPhase(SyncPhase::Cancelled);
     } else {
         switch (phase_) {
@@ -512,6 +563,7 @@ void KosyncSyncCoordinator::runWaitingWifi() {
 }
 
 void KosyncSyncCoordinator::runPulling() {
+    ssl_reserve_release();
     String err;
     int status = client_->pullProgress(hash_, pendingRemote_, err);
 
@@ -590,6 +642,7 @@ void KosyncSyncCoordinator::finishWithToast(const String& toast, bool success) {
     busy_.store(false);
     Serial.printf("[kosync_sync] restoring parser after sync\n");
     reader_.restoreParserAfterSync();
+    ssl_reserve_acquire();
     enterPhase(success ? SyncPhase::Done : SyncPhase::Failed);
 }
 
@@ -605,6 +658,7 @@ void KosyncSyncCoordinator::finishConflict() {
     // reads the EPUB.
     Serial.printf("[kosync_sync] restoring parser before conflict dialog\n");
     reader_.restoreParserAfterSync();
+    ssl_reserve_acquire();
     enterPhase(SyncPhase::AwaitConflict);
 }
 
@@ -614,6 +668,10 @@ SyncResult KosyncSyncCoordinator::takeResult() {
     enterPhase(SyncPhase::Idle);
     lastPhase_ = SyncPhase::Idle;
     return r;
+}
+
+bool kosync_ssl_reserve_init() {
+    return ssl_reserve_acquire();
 }
 
 void KosyncSyncCoordinator::cancelIfBusy() {
@@ -627,6 +685,7 @@ void KosyncSyncCoordinator::cancelIfBusy() {
     // If we cancelled mid-sync, the parser is in released state. Restore
     // it so the reader is usable on resume.
     reader_.restoreParserAfterSync();
+    ssl_reserve_acquire();
     enterPhase(SyncPhase::Idle);
     lastPhase_ = SyncPhase::Idle;
 }
