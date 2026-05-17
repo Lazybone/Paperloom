@@ -25,6 +25,11 @@ static constexpr int PAGE_BUTTONS = 3;  // Submenu reached from Device
 
 static int settingsPage = PAGE_READING;
 
+// Lets a touch handler that has already done its own partial flush
+// suppress the post-touch full repaint from handleSettingsTouch().
+// Same pattern used in ui_reader.cpp / ui_toast.cpp.
+extern void setNeedsRedraw(bool val);
+
 // Generic picker overlay. Used for button-action selection (per gesture),
 // brightness level, and font family.  Only one picker is active at a time.
 enum PickerKind {
@@ -235,6 +240,26 @@ static void drawRow(int y, const char* label, const char* value) {
     display_draw_hline(MARGIN_X, y + SETTINGS_ROW_H - 4, W - MARGIN_X * 2, 12);
 }
 
+// Mark and flush a single settings row as a partial Overlay update.
+// Caller MUST have already drawn the row's content into the framebuffer
+// (typically a display_draw_filled_rect over the row's y-band + a drawRow
+// call). Picks Zone::Overlay because the rect is dynamic per call (each
+// settings row has its own y).
+//
+// Use sparingly: every flush pays one PMIC poweron/poweroff bracket
+// (~10–15 ms on top of the waveform cost). For burst row changes the
+// user-perceivable cost is dominated by tap-to-tap human cadence anyway.
+//
+// Future work: factor the row-drawing logic out of ui_settings_draw so
+// the touch handler can call e.g. drawRowAt(rowIdx) + flushSettingsRow()
+// without recomputing layout. Until that's done, this helper is wired
+// only into the Page Numbers toggle as a pilot.
+static void flushSettingsRow(int row_y, int row_h, ChangeKind kind) {
+    display_set_overlay_rect(0, row_y, W, row_h);
+    display_mark_dirty(Zone::Overlay, kind);
+    display_flush();
+}
+
 // ═══════════════════════════════════════════════════════════════════
 // Settings screen drawing
 // ═══════════════════════════════════════════════════════════════════
@@ -267,10 +292,11 @@ void ui_settings_draw(bool& settingsFromLibrary) {
         }
 
         drawBottomBar("[ Cancel ]");
-        // Picker overlay shares the full-screen redraw policy of the rest
-        // of the settings surface — StructuralRedraw (GL16 partial) is
-        // safe now that drawHeader/drawBottomBar fill white instead of
-        // dark gray.
+        // Uses Zone::FullScreen, NOT Zone::Overlay: this overlay paints
+        // drawHeader at y=0..66 and drawBottomBar at y=910..960 — both
+        // outside the body-overlay rect (66..910). FullScreen + GL16
+        // partial sends the whole portrait buffer so chrome stays
+        // visible. (Same constraint as TOC/Bookmarks/GoTo in ui_reader.cpp.)
         display_begin_frame();
         display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
         display_flush();
@@ -586,10 +612,34 @@ AppState ui_settings_touch(int x, int y, BookReader& reader) {
                     mutated = true;
                     break;
                 }
-                case 6: // Page Numbers
+                case 6: { // Page Numbers — per-row partial flush pilot.
+                    // This is the only settings row currently wired to the
+                    // flushSettingsRow() helper (WP-D pilot). Other rows
+                    // still rely on the post-touch full repaint via
+                    // handleSettingsTouch()'s needsRedraw=true. Migrating
+                    // them requires factoring row-drawing out of
+                    // ui_settings_draw — deferred.
                     s.showPageNumbers = !s.showPageNumbers;
-                    mutated = true;
-                    break;
+                    saveSettingsNow();
+
+                    // Reading page is not a submenu, so the row band starts
+                    // below the tab strip.
+                    const int row_y =
+                        HEADER_HEIGHT + SETTINGS_TAB_H + MARGIN_Y + 10
+                        + 6 * SETTINGS_ROW_H;
+                    display_begin_frame();
+                    display_draw_filled_rect(0, row_y, W, SETTINGS_ROW_H, 15);
+                    drawRow(row_y, "Page Numbers",
+                            s.showPageNumbers ? "[ ON ]" : "[ OFF ]");
+                    flushSettingsRow(row_y, SETTINGS_ROW_H,
+                                     ChangeKind::StructuralRedraw);
+
+                    // Suppress the post-touch full repaint that
+                    // handleSettingsTouch() would otherwise trigger; we
+                    // already painted the only thing that changed.
+                    setNeedsRedraw(false);
+                    return STATE_SETTINGS;
+                }
             }
         } else if (settingsPage == PAGE_LIBRARY) {
             switch (row) {
