@@ -42,12 +42,6 @@ public:
     // forward-declared type — the complete type must be visible at destruction site.
     ~KosyncSyncCoordinator();
 
-    // ─── Legacy synchronous API (deprecated, removed in WP-10 Task 8) ──
-    //
-    // Wird waehrend der Migration noch von HTTP-Callern verwendet (heute
-    // keiner). Neue Aufrufer MUESSEN beginSync()/tick() benutzen.
-    SyncResult syncNow();
-
     // ─── Conflict resolution (unveraendert) ────────────────────────────
     SyncResult resolveConflict(bool keepLocal);
 

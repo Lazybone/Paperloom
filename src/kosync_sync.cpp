@@ -254,169 +254,13 @@ bool kosync_is_coordinator_initialized() {
 KosyncSyncCoordinator::KosyncSyncCoordinator(BookReader& reader)
     : reader_(reader) {}
 
-SyncResult KosyncSyncCoordinator::syncNow() {
-    SyncResult r{};
-    r.success = false;
-    r.hasConflict = false;
-
-    // Busy guard (atomic CAS — safe against concurrent UI taps).
-    bool expected = false;
-    if (!busy_.compare_exchange_strong(expected, true)) {
-        r.toast = "Sync läuft bereits";
-        return r;
-    }
-
-    // 1. Document hash (local — no WiFi needed)
-    String hash = reader_.getDocumentHash();
-    if (hash.length() != 32) {
-        Serial.printf("[kosync_sync] sync: bad doc hash (len=%u)\n",
-                      static_cast<unsigned>(hash.length()));
-        r.toast = "Sync fehlgeschlagen: Serverfehler";
-        busy_.store(false);
-        return r;
-    }
-
-    // 2. Validate settings + build client per-call (L1 contract: no shared state)
-    const Settings& s = settings_get();
-    if (s.kosyncServer.length() == 0 || s.kosyncUser.length() == 0 ||
-        s.kosyncKey.length() != 32 || s.kosyncCredentialsInvalid) {
-        Serial.printf("[kosync_sync] sync: not configured\n");
-        r.toast = "KoSync nicht konfiguriert";
-        busy_.store(false);
-        return r;
-    }
-
-    // 3. Bring WiFi up for the duration of this call. The guard tears it
-    //    back down on scope exit if we were the ones who connected.
-    //
-    // Transitional: this synchronous wait stays here until syncNow() is
-    // removed in Task 8. Mirrors the old behavior using the new begin/poll
-    // API so the WifiSyncGuard refactor lands compile-clean.
-    WifiSyncGuard wifi(s);
-    auto br = wifi.begin();
-    if (br == WifiSyncGuard::BeginResult::NoCredentials) {
-        Serial.printf("[kosync_sync] sync: no WiFi creds\n");
-        r.toast = "WLAN nicht konfiguriert";
-        busy_.store(false);
-        return r;
-    }
-    if (br == WifiSyncGuard::BeginResult::Started) {
-        const uint32_t deadline = millis() + 10000;
-        WifiSyncGuard::PollResult pr;
-        do {
-            pr = wifi.poll();
-            if (pr == WifiSyncGuard::PollResult::Connected) break;
-            if (pr == WifiSyncGuard::PollResult::Failed)    break;
-            delay(50);
-        } while (millis() < deadline);
-        if (pr != WifiSyncGuard::PollResult::Connected) {
-            Serial.printf("[kosync_sync] sync: WiFi connect failed\n");
-            r.toast = "Sync fehlgeschlagen: Kein WLAN";
-            busy_.store(false);
-            return r;
-        }
-    }
-    // br == AlreadyConnected → fall through, no wait needed.
-
-    KosyncClient client(s.kosyncServer, s.kosyncUser, s.kosyncKey);
-
-    // 4. Snapshot local progress
-    snapshot_local(reader_, s, pendingLocal_);
-
-    // 5. PULL
-    String err;
-    pendingRemote_ = KosyncProgress{};   // reset before reuse
-    int status = client.pullProgress(hash, pendingRemote_, err);
-
-    // 6. Status routing
-    if (status == 404) {
-        // Fresh sync — no remote yet, go straight to PUSH.
-        int ps = client.pushProgress(hash, pendingLocal_, err);
-        if (push_status_to_toast(ps, err, r.toast, "Sync ok (neu)")) {
-            reader_.setLastSyncTimestamp(static_cast<uint32_t>(time(nullptr)));
-            r.success = true;
-            r.local = pendingLocal_;
-        } else {
-            Serial.printf("[kosync_sync] sync: fresh-push failed status=%d\n", ps);
-        }
-        busy_.store(false);
-        return r;
-    }
-
-    if (status == 401 || status == 403) {
-        Serial.printf("[kosync_sync] sync: pull auth failed status=%d\n", status);
-        r.toast = "Sync fehlgeschlagen: Login ungültig";
-        busy_.store(false);
-        return r;
-    }
-    if (status == 0) {
-        Serial.printf("[kosync_sync] sync: pull transport error\n");
-        r.toast = err.length()
-                      ? String("Sync fehlgeschlagen: ") + err
-                      : String("Sync fehlgeschlagen: Server nicht erreichbar");
-        busy_.store(false);
-        return r;
-    }
-    if (status != 200) {
-        Serial.printf("[kosync_sync] sync: pull server error status=%d\n", status);
-        r.toast = "Sync fehlgeschlagen: Serverfehler";
-        busy_.store(false);
-        return r;
-    }
-
-    // 7. Defense-in-depth bounds check on remote payload.
-    if (!bounds_ok(pendingRemote_)) {
-        Serial.printf("[kosync_sync] OutOfBounds: percentage=%.4f, timestamp=%u\n",
-                      pendingRemote_.percentage, pendingRemote_.timestamp);
-        r.toast = "Sync fehlgeschlagen: Serverfehler";
-        busy_.store(false);
-        return r;
-    }
-
-    // 8. Try to derive chapter/page from the remote progress string. KoReader
-    //    emits XPath-style markers we can't interpret; if parse fails, default
-    //    to local.chapter so divergence is judged on percentage only.
-    pendingRemote_.chapter = pendingLocal_.chapter;
-    pendingRemote_.page    = pendingLocal_.page;
-    parse_paperloom_progress(pendingRemote_.progress,
-                             pendingRemote_.chapter, pendingRemote_.page);
-
-    // 9. Divergence check
-    const bool divergent =
-        (pendingLocal_.chapter != pendingRemote_.chapter) ||
-        (abs(pendingLocal_.page - pendingRemote_.page) > kPageDeltaThreshold) ||
-        (fabsf(pendingLocal_.percentage - pendingRemote_.percentage) >
-         kPercentageDeltaThreshold);
-
-    if (divergent) {
-        r.hasConflict = true;
-        r.local  = pendingLocal_;
-        r.remote = pendingRemote_;
-        r.toast  = "";   // dialog will set toast on resolution
-        // Leave busy_ true — coordinator waits for resolveConflict() / clearBusy().
-        return r;
-    }
-
-    // 10. Convergent — PUSH and finish.
-    int ps = client.pushProgress(hash, pendingLocal_, err);
-    if (push_status_to_toast(ps, err, r.toast, "Sync ok")) {
-        reader_.setLastSyncTimestamp(static_cast<uint32_t>(time(nullptr)));
-        r.success = true;
-        r.local = pendingLocal_;
-    } else {
-        Serial.printf("[kosync_sync] sync: convergent-push failed status=%d\n", ps);
-    }
-    busy_.store(false);
-    return r;
-}
-
 SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
     SyncResult r{};
     r.success = false;
     r.hasConflict = false;
 
-    // Must be in conflict state (busy_ stays true through syncNow's conflict
-    // return). If not, something is out of order — fail loudly but cheaply.
+    // Must be in conflict state (busy_ stays true through AwaitConflict phase).
+    // If not, something is out of order — fail loudly but cheaply.
     if (!busy_.load()) {
         r.toast = "Sync läuft nicht";
         return r;
@@ -443,10 +287,6 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
 
     // Bring WiFi up only after cheap checks pass. The guard tears it down
     // on scope exit if we connected here.
-    //
-    // Transitional: same synchronous wait as syncNow() — mirrors old behavior
-    // using the new begin/poll API so the WifiSyncGuard refactor lands
-    // compile-clean.
     WifiSyncGuard wifi(s);
     auto br = wifi.begin();
     if (br == WifiSyncGuard::BeginResult::NoCredentials) {

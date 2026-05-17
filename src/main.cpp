@@ -643,6 +643,12 @@ static void enterDeepSleep(bool triggeredByButton) {
     // Tear down the on-device WiFi scanner if it's still active.
     ui_wifi_setup_close();
 
+    // WP-10: tear down any in-flight kosync sync before persisting state
+    // and powering rails off. Idempotent — no-op if not busy.
+    if (kosync_is_coordinator_initialized()) {
+        kosync_get_coordinator().cancelIfBusy();
+    }
+
     // Persist app state so wake can resume where we left off.
     // Reader sub-screens (menu/TOC/bookmarks) resume to reader.
     // Settings/WiFi/OTA resume to library (transient screens).

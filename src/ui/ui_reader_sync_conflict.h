@@ -4,11 +4,11 @@
 
 // Conflict resolution dialog (WP-9).
 //
-// When syncNow() returns a SyncResult with hasConflict=true, the
-// coordinator leaves its busy flag set and the main dispatcher transitions
-// to STATE_SYNC_CONFLICT. The originating SyncResult must be passed in via
-// ui_sync_conflict_set_data() before the first draw so the dialog can show
-// local vs. remote progress without re-querying.
+// When the coordinator reports SyncPhase::AwaitConflict, the dispatcher reads
+// the result via takeResult() and transitions to STATE_SYNC_CONFLICT. The
+// originating SyncResult must be passed in via ui_sync_conflict_set_data()
+// before the first draw so the dialog can show local vs. remote progress
+// without re-querying.
 //
 // On user choice the dialog routes the decision back into the coordinator:
 //   * "Lokal behalten"    → resolveConflict(true)
@@ -17,8 +17,8 @@
 // In every terminal case a toast is shown and STATE_READER is returned.
 
 // Set by main.cpp dispatcher before transitioning to STATE_SYNC_CONFLICT.
-// Holds the SyncResult from the originating syncNow() call so the dialog
-// can read local/remote progress without re-querying.
+// Holds the SyncResult obtained via takeResult() so the dialog can read
+// local/remote progress without re-querying.
 void ui_sync_conflict_set_data(const SyncResult& r);
 
 // Called by main.cpp draw dispatcher for STATE_SYNC_CONFLICT.
