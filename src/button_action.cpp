@@ -53,15 +53,14 @@ void button_action_kosync_sync() {
         ui_toast_show("KoSync nicht konfiguriert", 2500, true);
         return;
     }
-    // Note: book-open check is performed inside coordinator.syncNow() via
+    // Note: book-open check is performed inside coordinator.beginSync() via
     // reader (it calls reader.getDocumentHash() which returns "" when no
     // book is open). No additional guard needed here.
-    SyncResult res = kosync_get_coordinator().syncNow();
-    if (res.hasConflict) {
-        ui_sync_conflict_set_data(res);
-        setAppState(STATE_SYNC_CONFLICT);
-        setNeedsRedraw(true);
-    } else if (res.toast.length() > 0) {
-        ui_toast_show(res.toast, 2500, !res.success);
+    String toast;
+    if (!kosync_get_coordinator().beginSync(toast)) {
+        ui_toast_show(toast, 2500, true);
+        return;
     }
+    setAppState(STATE_SYNC_PROGRESS);
+    setNeedsRedraw(true);
 }

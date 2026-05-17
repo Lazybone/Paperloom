@@ -30,7 +30,8 @@ const char* button_action_name(uint8_t action);
 void button_action_execute(uint8_t action);
 
 // WP-8: Public helper that mirrors the reader-menu "Sync Fortschritt" flow.
-// Runs the precheck → coordinator.syncNow() → toast / conflict-state branch.
+// Runs the precheck → coordinator.beginSync() → STATE_SYNC_PROGRESS
+// transition. The dispatcher-driven progress screen handles the rest.
 // Safe to call from main loop context (e.g. from button_action_execute()'s
 // dispatcher in main.cpp). Defined in button_action.cpp.
 void button_action_kosync_sync();
