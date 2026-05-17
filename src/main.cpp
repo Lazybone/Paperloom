@@ -1299,6 +1299,17 @@ static bool pca9535_read_user_button() {
 // Reads the per-gesture action from settings and routes.
 void button_action_execute(uint8_t action) {
     lastActivity = millis();
+    if (action == BTN_ACTION_NONE) return;
+
+    // WP-10: Suppress side-button actions while the sync-progress screen
+    // is active, so a stray press cannot strand the coordinator by
+    // changing appState without going through tickSyncProgress's cleanup.
+    // Sleep stays allowed: enterDeepSleep() calls cancelIfBusy() itself,
+    // so a sleep-during-sync teardown is safe.
+    if (appState == STATE_SYNC_PROGRESS && action != BTN_ACTION_SLEEP) {
+        return;
+    }
+
     switch (action) {
         case BTN_ACTION_NONE:
             break;

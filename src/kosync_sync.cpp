@@ -352,6 +352,11 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
         Serial.printf("[kosync_sync] resolve: push failed status=%d\n", ps);
     }
     busy_.store(false);
+    // WP-10: release the WifiSyncGuard that finishConflict() kept alive
+    // for the resolve-push round-trip. The member must be torn down here
+    // so DMA-capable heap is freed immediately for the next page-paint.
+    if (wifi_) wifi_->release();
+    wifi_.reset();
     return r;
 }
 
