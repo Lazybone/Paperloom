@@ -872,7 +872,7 @@ void setup() {
         // but partials are unsafe before the first full refresh after wake:
         // epdiy's epd_hl_init re-initializes hl_state.back_fb to all-white
         // while the panel still holds the latched sleep image. Any diff-based
-        // update (display_update_reader_body / _fast) is computed against the
+        // update (Zone::ReaderBody TextReflow / FullScreen StructuralRedraw) is computed against the
         // wrong baseline, producing wrong intermediate gray states and silent
         // corruption on the next periodic anti-ghost refresh.
         //

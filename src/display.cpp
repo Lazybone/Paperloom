@@ -600,46 +600,6 @@ void display_update_sleep() {
     }
 }
 
-// ─── Legacy shims onto the new intent API ─────────────────────────────
-// These keep existing UI callers (ui_reader, ui_library, ui_settings, …)
-// working unchanged. WP-1+ will migrate call sites to explicit
-// display_mark_dirty(Zone, ChangeKind) so the right waveform is chosen
-// per surface.
-//
-// Each shim is marked [[deprecated]] in display.h so remaining call
-// sites show a build warning. The definitions below intentionally
-// suppress that warning locally — only call sites should warn, not the
-// implementations themselves.
-#pragma GCC diagnostic push
-#pragma GCC diagnostic ignored "-Wdeprecated-declarations"
-
-void display_update() {
-    // Wake-from-sleep / heavy clean: forces a GC16 full refresh with
-    // 6-cycle clear and resets the anti-ghost counter.
-    display_begin_frame();
-    display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
-    display_flush();
-}
-
-void display_update_medium() {
-    // Legacy "medium" callers (chapter jump, settings exit) expect a
-    // flashing full refresh — route through WakeFull so display_flush()
-    // takes the full-clear path.
-    display_begin_frame();
-    display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull);
-    display_flush();
-}
-
-void display_update_fast() {
-    // Single-cycle "fast" full-screen update — now a GL16 non-flashing
-    // partial covering the entire screen. The anti-ghost auto-upgrade
-    // inside display_flush() will promote to a clean GC16 every
-    // REFRESH_INTERVAL_READER frames.
-    display_begin_frame();
-    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
-    display_flush();
-}
-
 // Free a buffer returned by rotatePortraitRegion(). No-op when the
 // pointer is the persistent _rotation_buf (which lives for the lifetime
 // of the process) or nullptr; otherwise hands off to free().
@@ -712,48 +672,6 @@ static uint8_t* rotatePortraitRegion(int px, int py, int pw, int ph, EpdRect& ou
 
     return out;
 }
-
-void display_update_reader_body(int x, int y, int w, int h, bool strongCleanup) {
-    if (!_pfb) return;
-    // The (x, y, w, h) hint from the caller is currently ignored: WP-1+
-    // will replace this entry point with explicit zone marking from the
-    // reader. For now we map the request to Zone::ReaderBody (which
-    // already has the correct rect baked into the zone table) and use
-    // TextReflow intent (GL16, non-flashing). The strongCleanup flag is
-    // honored by escalating to StructuralRedraw, which the anti-ghost
-    // cadence will still upgrade to GC16 on schedule.
-    (void)x; (void)y; (void)w; (void)h;
-    display_begin_frame();
-    display_mark_dirty(Zone::ReaderBody,
-                       strongCleanup ? ChangeKind::StructuralRedraw
-                                     : ChangeKind::TextReflow);
-    display_flush();
-}
-
-// Partial update: legacy entry point that historically redrew the full
-// screen without a clear. Now mapped to a TextReflow pass over the three
-// reader zones (header + body + footer), which is what every caller
-// actually needed.
-void display_update_partial() {
-    display_begin_frame();
-    display_mark_dirty(Zone::ReaderHeader, ChangeKind::TextReflow);
-    display_mark_dirty(Zone::ReaderBody,   ChangeKind::TextReflow);
-    display_mark_dirty(Zone::ReaderFooter, ChangeKind::TextReflow);
-    display_flush();
-}
-
-// Legacy smart-mode dispatch. fullRefresh==true forces a GC16 clean; the
-// non-full path is now handled by display_flush()'s anti-ghost counter,
-// so the old _partialCount-based threshold here is no longer needed.
-void display_update_mode(bool fullRefresh) {
-    if (fullRefresh) {
-        display_update();
-    } else {
-        display_update_partial();
-    }
-}
-
-#pragma GCC diagnostic pop
 
 // ─── Intent-based partial-update core ─────────────────────────────────
 
@@ -933,7 +851,7 @@ void display_flush() {
 
     if (isFullRefresh) {
         // Full-clear path: 6-cycle clear + GC16 GC redraw of the entire
-        // panel, exactly mirroring the legacy display_update() behavior.
+        // panel (wake-from-sleep / anti-ghost / explicit WakeFull intent).
         // We render the whole portrait buffer into _lfb so that even if
         // only the FullScreen zone was marked dirty, the visible result
         // matches what's in the framebuffer.

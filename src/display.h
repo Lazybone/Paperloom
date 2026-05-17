@@ -12,31 +12,10 @@ void display_draw_filled_rect(int x, int y, int w, int h, uint8_t gray4);
 void display_draw_hline(int x, int y, int w, uint8_t gray4);
 void display_draw_vline(int x, int y, int h, uint8_t gray4);
 void display_draw_rect(int x, int y, int w, int h, uint8_t gray4);
-// ─── Legacy display_update* shims ─────────────────────────────────────
-// These now route through the intent-based partial-update API below.
-// Each is [[deprecated]] so any remaining call site shows a build
-// warning. Migrate to display_begin_frame() + display_mark_dirty(Zone,
-// ChangeKind) + display_flush() with an explicit zone+intent.
-//
-// NOTE on _medium specifically: pre-refactor it was a 2-cycle partial.
-// The shim now escalates to WakeFull (6-cycle GC16 full clear) — a
-// 3× perf regression. Migrate _medium call sites first.
-//
-// display_update_sleep() is NOT deprecated — it is a special terminal
-// path (sleep image latch) that intentionally bypasses the intent API.
-[[deprecated("Routes through WakeFull (6-cycle GC16). Use display_mark_dirty(Zone::FullScreen, ChangeKind::WakeFull) + display_flush() with an explicit zone+intent.")]]
-void display_update();               // full refresh (heavy clear + draw, ~3s, 6 cycles)
-void display_update_sleep();         // full refresh for sleep image; preserves panel hold state
-[[deprecated("Silently maps to WakeFull (6-cycle GC16 full clear) — 3x perf regression vs the pre-refactor 2-cycle partial. Use display_mark_dirty + display_flush with the correct ChangeKind for the surface (TextReflow / StructuralRedraw).")]]
-void display_update_medium();        // medium refresh for chapter jumps (~1s, 2 cycles)
-[[deprecated("Maps to GL16 full-screen partial. Use display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw) + display_flush() directly.")]]
-void display_update_fast();          // lighter full-screen refresh for page turns (1 cycle)
-[[deprecated("Use display_mark_dirty(Zone::ReaderBody, ChangeKind::TextReflow [or StructuralRedraw]) + display_flush() directly.")]]
-void display_update_reader_body(int x, int y, int w, int h, bool strongCleanup = false);
-[[deprecated("Use display_mark_dirty on the actual dirty zones + display_flush() with explicit ChangeKind.")]]
-void display_update_partial();        // partial update (no clear, no flash)
-[[deprecated("Use display_mark_dirty + display_flush directly with an explicit ChangeKind instead of a fullRefresh boolean.")]]
-void display_update_mode(bool fullRefresh);  // select mode
+// Special terminal path: latches the sleep image and preserves panel
+// hold state. Intentionally bypasses the intent API below — do not
+// generalize this into display_mark_dirty/display_flush.
+void display_update_sleep();
 int  display_text_width(const char* text);
 int  display_font_height();
 int  display_font_ascender();
@@ -67,9 +46,6 @@ int  display_height();
 // REFRESH_INTERVAL_READER threshold from include/config.h, the next flush
 // is auto-escalated to GC16 full refresh and the counter resets.
 //
-// Legacy display_update*() entry points above are now thin wrappers that
-// internally call this API, so existing callers keep working until they
-// migrate to explicit zone+intent in later work packages.
 // =====================================================================
 //
 // ─── Intent-based partial-update API ──────────────────────────────────
