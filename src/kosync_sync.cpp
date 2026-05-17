@@ -3,6 +3,7 @@
 #include <Arduino.h>
 #include <WiFi.h>
 #include <assert.h>
+#include <esp_heap_caps.h>
 #include <math.h>
 #include <memory>
 #include <stdlib.h>
@@ -16,6 +17,85 @@
 namespace {
 
 std::unique_ptr<KosyncSyncCoordinator> g_coordinator;
+
+// RAII helper that brings WiFi up for the duration of a sync call and tears
+// it back down on scope exit — but only if this guard was the one that
+// established the connection. If WiFi is already connected (e.g. user is in
+// the WiFi-Upload screen), we reuse the existing session and leave it alone.
+//
+// Mirrors the connect-wait loop from ui_update.cpp::ui_ota_tick() so both
+// flows behave consistently. The 10 s budget matches OTA.
+class WifiSyncGuard {
+public:
+    enum class Result { Connected, NoCredentials, ConnectFailed };
+
+    explicit WifiSyncGuard(const Settings& s) {
+        if (WiFi.status() == WL_CONNECTED) {
+            // Someone else owns the radio (WiFi upload, OTA). Reuse and do
+            // not tear down on destruct.
+            result_ = Result::Connected;
+            return;
+        }
+        if (s.wifiSSID.length() == 0) {
+            result_ = Result::NoCredentials;
+            return;
+        }
+        // Diagnostic: snapshot internal heap state before AND after WiFi.begin
+        // so we can tell whether the WPA2 stack itself starves DMA-capable
+        // internal RAM. Previous run showed 28 KB largest free block before
+        // begin() yet `esp-sha: Failed to allocate buf memory` still fired,
+        // so the working hypothesis is that the WiFi task allocates the
+        // remaining DMA-cap RAM in the first ~144 ms after begin().
+        Serial.printf("[kosync_sync] heap before WiFi.begin: dma_free=%u dma_largest=%u\n",
+                      static_cast<unsigned>(heap_caps_get_free_size(
+                          MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
+                      static_cast<unsigned>(heap_caps_get_largest_free_block(
+                          MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)));
+
+        WiFi.mode(WIFI_STA);
+        WiFi.begin(s.wifiSSID.c_str(), s.wifiPass.c_str());
+        unsigned long start = millis();
+
+        // Poll heap every 50 ms for the first 500 ms to catch the moment
+        // the WPA2 4-way handshake consumes its working memory.
+        for (int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; ++i) {
+            delay(50);
+            Serial.printf("[kosync_sync] heap t=%lums: dma_largest=%u status=%d\n",
+                          millis() - start,
+                          static_cast<unsigned>(heap_caps_get_largest_free_block(
+                              MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
+                          static_cast<int>(WiFi.status()));
+        }
+
+        while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
+            delay(250);
+        }
+        if (WiFi.status() == WL_CONNECTED) {
+            weBroughtUp_ = true;
+            result_ = Result::Connected;
+        } else {
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+            result_ = Result::ConnectFailed;
+        }
+    }
+
+    ~WifiSyncGuard() {
+        if (weBroughtUp_) {
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+        }
+    }
+
+    WifiSyncGuard(const WifiSyncGuard&)            = delete;
+    WifiSyncGuard& operator=(const WifiSyncGuard&) = delete;
+
+    Result result() const { return result_; }
+
+private:
+    Result result_       = Result::ConnectFailed;
+    bool   weBroughtUp_  = false;
+};
 
 // Divergence thresholds. Local-vs-remote progress is considered convergent
 // (no conflict dialog) when chapter matches AND the page delta is within
@@ -166,15 +246,7 @@ SyncResult KosyncSyncCoordinator::syncNow() {
         return r;
     }
 
-    // 1. WiFi check
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.printf("[kosync_sync] sync: no WiFi\n");
-        r.toast = "Sync fehlgeschlagen: Kein WLAN";
-        busy_.store(false);
-        return r;
-    }
-
-    // 2. Document hash
+    // 1. Document hash (local — no WiFi needed)
     String hash = reader_.getDocumentHash();
     if (hash.length() != 32) {
         Serial.printf("[kosync_sync] sync: bad doc hash (len=%u)\n",
@@ -184,7 +256,7 @@ SyncResult KosyncSyncCoordinator::syncNow() {
         return r;
     }
 
-    // 3. Validate settings + build client per-call (L1 contract: no shared state)
+    // 2. Validate settings + build client per-call (L1 contract: no shared state)
     const Settings& s = settings_get();
     if (s.kosyncServer.length() == 0 || s.kosyncUser.length() == 0 ||
         s.kosyncKey.length() != 32 || s.kosyncCredentialsInvalid) {
@@ -193,6 +265,25 @@ SyncResult KosyncSyncCoordinator::syncNow() {
         busy_.store(false);
         return r;
     }
+
+    // 3. Bring WiFi up for the duration of this call. The guard tears it
+    //    back down on scope exit if we were the ones who connected.
+    WifiSyncGuard wifi(s);
+    switch (wifi.result()) {
+        case WifiSyncGuard::Result::NoCredentials:
+            Serial.printf("[kosync_sync] sync: no WiFi creds\n");
+            r.toast = "WLAN nicht konfiguriert";
+            busy_.store(false);
+            return r;
+        case WifiSyncGuard::Result::ConnectFailed:
+            Serial.printf("[kosync_sync] sync: WiFi connect failed\n");
+            r.toast = "Sync fehlgeschlagen: Kein WLAN";
+            busy_.store(false);
+            return r;
+        case WifiSyncGuard::Result::Connected:
+            break;
+    }
+
     KosyncClient client(s.kosyncServer, s.kosyncUser, s.kosyncKey);
 
     // 4. Snapshot local progress
@@ -308,19 +399,30 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
         return r;
     }
 
-    if (WiFi.status() != WL_CONNECTED) {
-        Serial.printf("[kosync_sync] resolve: no WiFi\n");
-        r.toast = "Sync fehlgeschlagen: Kein WLAN";
-        busy_.store(false);
-        return r;
-    }
-
     String hash = reader_.getDocumentHash();
     if (hash.length() != 32) {
         Serial.printf("[kosync_sync] resolve: bad doc hash\n");
         r.toast = "Sync fehlgeschlagen: Serverfehler";
         busy_.store(false);
         return r;
+    }
+
+    // Bring WiFi up only after cheap checks pass. The guard tears it down
+    // on scope exit if we connected here.
+    WifiSyncGuard wifi(s);
+    switch (wifi.result()) {
+        case WifiSyncGuard::Result::NoCredentials:
+            Serial.printf("[kosync_sync] resolve: no WiFi creds\n");
+            r.toast = "WLAN nicht konfiguriert";
+            busy_.store(false);
+            return r;
+        case WifiSyncGuard::Result::ConnectFailed:
+            Serial.printf("[kosync_sync] resolve: WiFi connect failed\n");
+            r.toast = "Sync fehlgeschlagen: Kein WLAN";
+            busy_.store(false);
+            return r;
+        case WifiSyncGuard::Result::Connected:
+            break;
     }
 
     KosyncClient client(s.kosyncServer, s.kosyncUser, s.kosyncKey);

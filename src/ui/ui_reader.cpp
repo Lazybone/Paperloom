@@ -7,7 +7,6 @@
 #include "../reader.h"
 #include "../kosync_sync.h"
 #include "ui_toast.h"
-#include "ui_reader_kosync_setup.h"
 #include "ui_reader_sync_conflict.h"
 #include "config.h"
 
@@ -590,14 +589,9 @@ void ui_reader_menu_draw(BookReader& reader) {
     display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
     y += MENU_ITEM_H;
 
-    // WP-7: KoSync entries — placed next to Bookmarks so users can sync
-    // before continuing to read, and open the credential setup from the
-    // same menu without leaving the reader context.
+    // Sync entry: placed next to Bookmarks so users can sync before
+    // continuing to read. Credential entry lives in the web UI.
     display_draw_text(indent, y, "Sync Fortschritt", 0);
-    display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
-    y += MENU_ITEM_H;
-
-    display_draw_text(indent, y, "KoSync Setup", 0);
     display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
     y += MENU_ITEM_H;
 
@@ -645,9 +639,9 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
     int zoneTop = MENU_START_Y + 40 - FONT_H;
     int row = (y - zoneTop) / MENU_ITEM_H;
     // Row count = base entries (Go to, TOC, Bookmarks, Sync Fortschritt,
-    // KoSync Setup, Settings, Library, Sleep = 8) + optional Back row when
-    // the reader has navigation history. Keep in sync with ui_reader_menu_draw.
-    int rowCount = reader.hasNavigationHistory() ? 9 : 8;
+    // Settings, Library, Sleep = 7) + optional Back row when the reader
+    // has navigation history. Keep in sync with ui_reader_menu_draw.
+    int rowCount = reader.hasNavigationHistory() ? 8 : 7;
 
     if (y >= zoneTop && y < zoneTop + MENU_ITEM_H * rowCount) {
         refresh.fastRefresh = false;
@@ -705,19 +699,15 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
                 setNeedsRedraw(true);
                 return STATE_READER;
             }
-            case 4: // KoSync Setup — on-device credential entry
-                ui_kosync_setup_enter();
-                setNeedsRedraw(true);
-                return STATE_KOSYNC_SETUP;
-            case 5: // Settings
+            case 4: // Settings
                 setNeedsRedraw(true);
                 return STATE_SETTINGS;
-            case 6: // Library
+            case 5: // Library
                 reader.saveProgress();
                 reader.closeBook();
                 setNeedsRedraw(true);
                 return STATE_LIBRARY;
-            case 7: // Sleep — Trigger deep sleep
+            case 6: // Sleep — Trigger deep sleep
                 // Intentionally do NOT call reader.saveProgress() /
                 // reader.closeBook() here: enterDeepSleep() (invoked by
                 // the dispatcher in handleMenuTouch when it sees
