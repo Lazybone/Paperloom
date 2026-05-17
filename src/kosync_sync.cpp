@@ -91,13 +91,10 @@ public:
     // Idempotent.
     void release() {
         if (released_) return;
-        if (weBroughtUp_ && WiFi.status() != WL_CONNECTED) {
-            // begin() wurde gerufen, aber wir haben nie Connected gesehen
-            // (oder die Verbindung ist abgerissen). WiFi-Stack trotzdem
-            // sauber abreissen.
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_OFF);
-        } else if (weBroughtUp_) {
+        if (weBroughtUp_) {
+            // Tear down regardless of current WL state: begin() may have been
+            // called but never reached Connected, OR we did connect and now
+            // it's time to release the radio. Both paths need disconnect+OFF.
             WiFi.disconnect(true);
             WiFi.mode(WIFI_OFF);
         }
