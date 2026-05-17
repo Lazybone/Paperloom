@@ -117,6 +117,44 @@ static void invalidate_zone_cache() {
     s_zoneCacheValid = false;
 }
 
+// ───────────────────────────────────────────────────────────────────────
+// Tall-overlay helpers — shared by Menu / TOC / Bookmarks / GoTo
+//
+// Overlay rect — header-bottom (y=66) to footer-top (y=910). Only pixels
+// inside this rect reach the panel: display_flush() rotates ONLY (x,y,w,h)
+// from _pfb to the heap buffer it sends to epdiy, so _pfb writes outside
+// the rect are harmless (never rasterized, never enter epdiy back_fb).
+// On overlay-dismiss, s_overlayDismissed triggers a Reader 3-zone repaint
+// that overwrites any _pfb residue outside the rect. Practical contract:
+// paint can extend slightly outside the rect (e.g. glyph ascenders above
+// the rect top for a baseline near y=80) without visible artefacts.
+// ───────────────────────────────────────────────────────────────────────
+namespace {
+constexpr int TALL_OVERLAY_X = 0;
+constexpr int TALL_OVERLAY_Y = HEADER_HEIGHT;                       // 66
+constexpr int TALL_OVERLAY_W = PORTRAIT_W;                          // 540
+constexpr int TALL_OVERLAY_H = PORTRAIT_H - HEADER_HEIGHT - FOOTER_HEIGHT;  // 844
+} // namespace
+
+// Open a tall overlay paint pass: begin frame, wipe the overlay rect to
+// white. Caller draws menu/list content into the rect, then calls
+// tall_overlay_flush() with the appropriate ChangeKind.
+static void tall_overlay_begin() {
+    display_begin_frame();
+    display_draw_filled_rect(TALL_OVERLAY_X, TALL_OVERLAY_Y,
+                             TALL_OVERLAY_W, TALL_OVERLAY_H, 15);
+}
+
+// Close a tall overlay paint pass: set the overlay rect, mark dirty with
+// the given intent, flush. Default intent is StructuralRedraw (GL16);
+// callers wanting AntiGhost (forced GC16 clean) pass it explicitly.
+static void tall_overlay_flush(ChangeKind kind = ChangeKind::StructuralRedraw) {
+    display_set_overlay_rect(TALL_OVERLAY_X, TALL_OVERLAY_Y,
+                             TALL_OVERLAY_W, TALL_OVERLAY_H);
+    display_mark_dirty(Zone::Overlay, kind);
+    display_flush();
+}
+
 // ─── Header zone (0, 0, 540, 66) ───────────────────────────────────
 // Title (+ optional "* " bookmark marker), battery percentage, and the
 // thin divider at y=62 (= HEADER_HEIGHT - 4). All writes stay inside
@@ -501,24 +539,8 @@ AppState ui_reader_touch(int x, int y, bool isLongPress,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_menu_draw(BookReader& reader) {
-    // Overlay rect — header-bottom (y=66) to footer-top (y=910). Only
-    // pixels inside this rect reach the panel: display_flush() rotates
-    // ONLY (x, y, w, h) from _pfb to the heap buffer it sends to epdiy,
-    // so _pfb writes outside the rect are harmless (never rasterized,
-    // never enter epdiy back_fb). On overlay-dismiss, s_overlayDismissed
-    // triggers a Reader 3-zone repaint that overwrites any _pfb residue
-    // outside the rect. Practical contract: paint can extend slightly
-    // outside the rect (e.g. glyph ascenders above the rect top for a
-    // baseline near y=80) without visible artefacts.
-    constexpr int OVERLAY_X = 0;
-    constexpr int OVERLAY_Y = HEADER_HEIGHT;                  // 66
-    constexpr int OVERLAY_W = PORTRAIT_W;                     // 540
-    constexpr int OVERLAY_H = PORTRAIT_H - HEADER_HEIGHT
-                                         - FOOTER_HEIGHT;     // 844
-
-    display_begin_frame();
+    tall_overlay_begin();
     display_set_font_size(2);  // chrome always in Inter
-    display_draw_filled_rect(OVERLAY_X, OVERLAY_Y, OVERLAY_W, OVERLAY_H, 15);
 
     // Title — truncate by pixel width to fit screen
     String title = reader.getTitle();
@@ -633,9 +655,7 @@ void ui_reader_menu_draw(BookReader& reader) {
         display_draw_text((W - hw) / 2, H - 100, hint, 10);
     }
 
-    display_set_overlay_rect(OVERLAY_X, OVERLAY_Y, OVERLAY_W, OVERLAY_H);
-    display_mark_dirty(Zone::Overlay, ChangeKind::StructuralRedraw);
-    display_flush();
+    tall_overlay_flush();
     setNeedsRedraw(false);
 }
 
