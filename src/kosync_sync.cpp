@@ -59,7 +59,15 @@ public:
             // esp_wifi_init or STA-enable failed (typically DMA-cap RAM
             // exhausted — see esp_wifi log lines above). No point waiting
             // 10s for a poll() that will never reach Connected.
+            //
+            // CRITICAL: we already called WiFi.mode(WIFI_STA) which
+            // allocates internal WiFi stack memory. Without an explicit
+            // WIFI_OFF here, that allocation accumulates across failed
+            // attempts and eventually starves the DMA heap completely
+            // (observed: dma_largest 28KB → 16 bytes after 1-2 retries).
             Serial.println("[kosync_sync] WiFi.begin returned WL_CONNECT_FAILED");
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
             return BeginResult::WifiInitFailed;
         }
         startMs_     = millis();
