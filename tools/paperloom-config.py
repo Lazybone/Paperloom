@@ -223,37 +223,43 @@ def cmd_raw(args):
 # ── CLI wiring ────────────────────────────────────────────────────────────────
 
 def main():
-    parser = argparse.ArgumentParser(
-        description="Configure Paperloom device over USB-Serial.")
-    parser.add_argument("--port", default=None,
+    # Parent parser holding --port so EVERY subcommand inherits it.
+    # This lets the user write `paperloom-config.py scan --port X` or
+    # `paperloom-config.py --port X scan` — both work.
+    common = argparse.ArgumentParser(add_help=False)
+    common.add_argument("--port", default=None,
                         help="Serial port (auto-detected when omitted)")
+
+    parser = argparse.ArgumentParser(
+        description="Configure Paperloom device over USB-Serial.",
+        parents=[common])
     sub = parser.add_subparsers(dest="subcmd", required=True)
 
-    sub.add_parser("status", help="Show device status").set_defaults(func=cmd_status)
-    sub.add_parser("scan",   help="Scan for WiFi networks").set_defaults(func=cmd_scan)
+    sub.add_parser("status", help="Show device status",
+                   parents=[common]).set_defaults(func=cmd_status)
+    sub.add_parser("scan",   help="Scan for WiFi networks",
+                   parents=[common]).set_defaults(func=cmd_scan)
 
-    p_wifi = sub.add_parser("wifi", help="Set WiFi credentials")
+    p_wifi = sub.add_parser("wifi", help="Set WiFi credentials", parents=[common])
     p_wifi.add_argument("ssid")
     p_wifi.add_argument("password")
     p_wifi.set_defaults(func=cmd_wifi)
 
-    p_ks = sub.add_parser("kosync", help="Set KoSync credentials")
+    p_ks = sub.add_parser("kosync", help="Set KoSync credentials", parents=[common])
     p_ks.add_argument("server",   help="KoSync server URL (https://...)")
     p_ks.add_argument("user",     help="KoSync username")
     p_ks.add_argument("password", help="KoSync plaintext password (hashed on device)")
     p_ks.add_argument("--device", default=None, help="Device name (optional)")
     p_ks.set_defaults(func=cmd_kosync)
 
-    sub.add_parser("reboot", help="Reboot the device").set_defaults(func=cmd_reboot)
+    sub.add_parser("reboot", help="Reboot the device",
+                   parents=[common]).set_defaults(func=cmd_reboot)
 
-    p_raw = sub.add_parser("raw", help="Send a raw command (debug)")
+    p_raw = sub.add_parser("raw", help="Send a raw command (debug)", parents=[common])
     p_raw.add_argument("command", help="Command string with TAB separators")
     p_raw.set_defaults(func=cmd_raw)
 
     args = parser.parse_args()
-    # --port can appear before or after subcommand; copy to args if needed
-    if not hasattr(args, "port"):
-        args.port = None
     args.func(args)
 
 
