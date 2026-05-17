@@ -501,17 +501,19 @@ AppState ui_reader_touch(int x, int y, bool isLongPress,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_menu_draw(BookReader& reader) {
-    // Menu is currently rendered as a full-screen overlay (it paints
-    // every row from y=80 to the bottom hint). Migrated to the intent
-    // API: Zone::FullScreen + StructuralRedraw → GL16 non-flashing
-    // partial across the whole panel, no 6-cycle clear. The matching
-    // close path (ui_reader_menu_touch → STATE_READER) sets
-    // s_overlayDismissed so the next reader draw repaints all three
-    // zones cleanly.
-    display_begin_frame();
+    // Overlay rect — header-bottom to footer-top. All overlay paint MUST
+    // stay within this rect; pixels written outside will not sync back_fb
+    // and may drift on overlay-dismiss. s_overlayDismissed triggers a
+    // Reader 3-zone repaint that restores everything outside.
+    constexpr int OVERLAY_X = 0;
+    constexpr int OVERLAY_Y = HEADER_HEIGHT;                  // 66
+    constexpr int OVERLAY_W = PORTRAIT_W;                     // 540
+    constexpr int OVERLAY_H = PORTRAIT_H - HEADER_HEIGHT
+                                         - FOOTER_HEIGHT;     // 844
 
+    display_begin_frame();
     display_set_font_size(2);  // chrome always in Inter
-    display_fill_screen(15);
+    display_draw_filled_rect(OVERLAY_X, OVERLAY_Y, OVERLAY_W, OVERLAY_H, 15);
 
     // Title — truncate by pixel width to fit screen
     String title = reader.getTitle();
@@ -626,7 +628,8 @@ void ui_reader_menu_draw(BookReader& reader) {
         display_draw_text((W - hw) / 2, H - 100, hint, 10);
     }
 
-    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
+    display_set_overlay_rect(OVERLAY_X, OVERLAY_Y, OVERLAY_W, OVERLAY_H);
+    display_mark_dirty(Zone::Overlay, ChangeKind::StructuralRedraw);
     display_flush();
     setNeedsRedraw(false);
 }
