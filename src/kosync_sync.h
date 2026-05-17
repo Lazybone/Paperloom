@@ -68,6 +68,10 @@ public:
 
     SyncPhase  currentPhase() const { return phase_; }
 
+    // Returns the phase that was active when the sync transitioned to
+    // Failed. Idle if no failure has been recorded since the last beginSync.
+    SyncPhase lastFailedPhase() const { return failedAtPhase_; }
+
     // Gueltig wenn phase_ ∈ {Done, Failed, Cancelled, AwaitConflict}.
     // Liest pendingResult_ aus und setzt phase_ auf Idle zurueck —
     // genau einmal pro Sync-Sequenz aufrufen.
@@ -92,8 +96,9 @@ private:
     BookReader&                    reader_;
     std::atomic<bool>              busy_{false};
     std::atomic<bool>              cancelRequested_{false};
-    SyncPhase                      phase_       = SyncPhase::Idle;
-    SyncPhase                      lastPhase_   = SyncPhase::Idle;  // fuer tick()-changed-Hint
+    SyncPhase                      phase_          = SyncPhase::Idle;
+    SyncPhase                      lastPhase_      = SyncPhase::Idle;  // fuer tick()-changed-Hint
+    SyncPhase                      failedAtPhase_  = SyncPhase::Idle;
     KosyncProgress                 pendingLocal_{};
     KosyncProgress                 pendingRemote_{};
     String                         hash_;

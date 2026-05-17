@@ -81,11 +81,45 @@ RowStatus row_status_for(int rowIdx, SyncPhase ph) {
 
     const int r = rank(ph);
     if (ph == SyncPhase::Failed) {
-        // Markiere die zuletzt active Zeile als failed; alles davor done.
-        // Welche das ist, koennen wir aus dem pendingResult ableiten —
-        // ohne diese Info markieren wir konservativ Zeile 5 als failed.
-        if (rowIdx <= 1) return RowStatus::Done;
-        if (rowIdx == 4) return RowStatus::Failed;
+        // Map die zuletzt-aktive Phase auf die richtige Zeile.
+        // Sequenz ist Hashing → WaitingWifi → Pulling → (AwaitConflict?) → Pushing.
+        // Visuelle Reihenfolge (kRows) ist WLAN, Hash, Server, Vergleich, Fertigstellen.
+        SyncPhase failedAt = kosync_is_coordinator_initialized()
+                                 ? kosync_get_coordinator().lastFailedPhase()
+                                 : SyncPhase::Idle;
+
+        // progressRank: Reihenfolge in der echten Sequenz (Hashing=0, WaitingWifi=1, …)
+        auto progressRankOf = [](SyncPhase p) -> int {
+            switch (p) {
+                case SyncPhase::Hashing:       return 0;
+                case SyncPhase::WaitingWifi:   return 1;
+                case SyncPhase::Pulling:       return 2;
+                case SyncPhase::AwaitConflict: return 3;
+                case SyncPhase::Pushing:       return 4;
+                default:                       return -1;
+            }
+        };
+
+        // Welche Phase repraesentiert jede Zeile?
+        static constexpr SyncPhase kRowPhase[ROW_COUNT] = {
+            SyncPhase::WaitingWifi,    // row 0  — "WLAN verbinden"
+            SyncPhase::Hashing,        // row 1  — "Buch-Hash"
+            SyncPhase::Pulling,        // row 2  — "Server abrufen"
+            SyncPhase::AwaitConflict,  // row 3  — "Vergleich"
+            SyncPhase::Pushing,        // row 4  — "Fertigstellen"
+        };
+
+        const int failedRank = progressRankOf(failedAt);
+        const int rowRank    = progressRankOf(kRowPhase[rowIdx]);
+
+        if (failedRank < 0) {
+            // Keine konkrete Failure-Phase bekannt — alle Zeilen pending,
+            // letzte Zeile als Failed (Fallback wie zuvor).
+            if (rowIdx == 4) return RowStatus::Failed;
+            return RowStatus::Pending;
+        }
+        if (rowRank < failedRank)  return RowStatus::Done;
+        if (rowRank == failedRank) return RowStatus::Failed;
         return RowStatus::Pending;
     }
     if (ph == SyncPhase::Cancelled || ph == SyncPhase::Idle) {

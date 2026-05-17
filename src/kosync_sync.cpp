@@ -385,6 +385,7 @@ bool KosyncSyncCoordinator::beginSync(String& outToast) {
     hash_              = String();
     freshSync_         = false;
     wifiBudgetStartMs_ = 0;
+    failedAtPhase_     = SyncPhase::Idle;
     wifi_.reset();
     client_.reset();
     enterPhase(SyncPhase::Hashing);
@@ -543,6 +544,9 @@ void KosyncSyncCoordinator::runPushing() {
 }
 
 void KosyncSyncCoordinator::finishWithToast(const String& toast, bool success) {
+    if (!success) {
+        failedAtPhase_ = phase_;   // remember which phase actually failed
+    }
     pendingResult_.success     = success;
     pendingResult_.hasConflict = false;
     pendingResult_.toast       = toast;

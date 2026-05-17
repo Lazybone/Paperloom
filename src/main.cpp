@@ -571,7 +571,7 @@ static void handleSyncProgressTouch(int x, int y) {
 
 // Anzeigedauern fuer die terminalen Phasen (siehe Spec §5.1).
 constexpr uint32_t kSyncDoneShownMs      = 800;
-constexpr uint32_t kSyncFailedShownMs    = 200;
+constexpr uint32_t kSyncFailedShownMs    = 1500;
 constexpr uint32_t kSyncCancelledShownMs = 0;
 
 static void tickSyncProgress() {
