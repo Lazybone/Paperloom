@@ -2,7 +2,6 @@
 
 #include "kosync_sync.h"
 #include "ui/ui_toast.h"
-#include "ui/ui_reader_sync_conflict.h"
 #include "settings.h"
 #include "../include/state.h"
 
