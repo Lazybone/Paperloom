@@ -871,7 +871,9 @@ void display_flush() {
                 if ((Zone)i == Zone::Overlay) {
                     // Unconditional — the rect MUST be set each frame an overlay
                     // is dirty. Silently skipping would freeze the visible overlay.
-                    Serial.printf("[FLUSH] ERROR: Zone::Overlay dirty but rect"
+                    // Only fires on a programmer error (overlay dirty without rect)
+                    // and is rare enough that the Serial.printf cost is negligible.
+                    Serial.printf("[FLUSH] WARN: Zone::Overlay dirty but rect"
                                   " empty — caller forgot display_set_overlay_rect().\n");
                 }
                 continue;
