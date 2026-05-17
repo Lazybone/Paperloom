@@ -56,6 +56,19 @@ static uint8_t* _pfb = nullptr;
 // Landscape framebuffer for pushing to hardware: 960 wide × 540 tall
 static uint8_t* _lfb = nullptr;
 
+// Persistent rotation buffer for Zone::Overlay and Reader sub-zones.
+// Sized for the largest possible rotation (FullScreen 540×960 / 2 = 259200
+// bytes at 4-bpp landscape). Allocated once in display_init from PSRAM;
+// each rotatePortraitRegion() reuses the prefix sized to the requested
+// region. Removes the per-flush malloc/free that fragmented the heap on
+// rapid page-turns. Safe for multi-zone flushes because epdiy's
+// epd_hl_update_area() copies the framebuffer synchronously — by the time
+// epd_be_draw_grayscale_image() returns, the buffer is free for reuse.
+// If a future epdiy upgrade ever introduces async draws, this helper
+// would need an in-use flag.
+static constexpr size_t ROTATION_BUF_BYTES = PORTRAIT_W * PORTRAIT_H / 2;
+static uint8_t* _rotation_buf = nullptr;
+
 // Compile-time guard: if a new FontFamily value is added to the enum
 // without bumping FONT_FAMILY_COUNT, the table row count below will be
 // wrong and an `int family` value can index past the end.  These asserts
@@ -397,6 +410,14 @@ void display_init() {
     memset(_pfb, 0xFF, PORTRAIT_W * PORTRAIT_H / 2);
     memset(_lfb, 0xFF, PHYS_WIDTH * PHYS_HEIGHT / 2);
 
+    _rotation_buf = (uint8_t*) ps_malloc(ROTATION_BUF_BYTES);
+    if (!_rotation_buf) {
+        Serial.printf("[DISP] FATAL: ps_malloc(%u) for rotation buffer failed\n",
+                      (unsigned)ROTATION_BUF_BYTES);
+        // Fall back to per-flush malloc by leaving _rotation_buf == nullptr;
+        // rotatePortraitRegion below handles that path.
+    }
+
     glyph_cache_init();
 }
 
@@ -608,9 +629,19 @@ void display_update_fast() {
     display_flush();
 }
 
+// Free a buffer returned by rotatePortraitRegion(). No-op when the
+// pointer is the persistent _rotation_buf (which lives for the lifetime
+// of the process) or nullptr; otherwise hands off to free().
+static inline void free_rotation_buffer(uint8_t* ptr) {
+    if (ptr && ptr != _rotation_buf) free(ptr);
+}
+
 // Rotate only a sub-region of the portrait framebuffer to landscape.
-// Returns a freshly allocated buffer sized to the landscape sub-region.
-// The caller must free() the returned buffer.
+// Returns a buffer sized to the landscape sub-region. The returned
+// pointer is either the persistent _rotation_buf (when the region fits)
+// or a freshly malloc'd buffer (fallback when _rotation_buf is null or
+// the region is somehow larger than ROTATION_BUF_BYTES). Callers MUST
+// release the returned pointer via free_rotation_buffer(), not free().
 static uint8_t* rotatePortraitRegion(int px, int py, int pw, int ph, EpdRect& outArea) {
     // Clamp to portrait bounds
     if (px < 0) { pw += px; px = 0; }
@@ -627,8 +658,14 @@ static uint8_t* rotatePortraitRegion(int px, int py, int pw, int ph, EpdRect& ou
 
     int l_stride = (outArea.width + 1) / 2;  // bytes per row in output
     size_t outBytes = (size_t)l_stride * outArea.height;
-    uint8_t* out = (uint8_t*)malloc(outBytes);
-    if (!out) return nullptr;
+    uint8_t* out;
+    if (_rotation_buf && outBytes <= ROTATION_BUF_BYTES) {
+        // Reuse the persistent PSRAM buffer — no malloc on the flush path.
+        out = _rotation_buf;
+    } else {
+        out = (uint8_t*)malloc(outBytes);
+        if (!out) return nullptr;
+    }
     memset(out, 0xFF, outBytes);
 
     int p_stride = PORTRAIT_W / 2;  // bytes per portrait row
@@ -924,15 +961,18 @@ void display_flush() {
                 continue;
             }
 
-            // Sub-zone — rotate just this rect into a heap buffer.
+            // Sub-zone — rotate just this rect into the persistent PSRAM
+            // rotation buffer (falls back to malloc if alloc failed at
+            // boot). Caller releases via free_rotation_buffer() so the
+            // persistent path stays a no-op.
             EpdRect area;
             uint8_t* region = rotatePortraitRegion(z.x, z.y, z.w, z.h, area);
             if (!region || area.width <= 0 || area.height <= 0) {
-                if (region) free(region);
+                free_rotation_buffer(region);
                 continue;
             }
             epd_be_draw_grayscale_image(area, region, mode, temp_c);
-            free(region);
+            free_rotation_buffer(region);
         }
     }
 
