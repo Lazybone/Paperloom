@@ -846,17 +846,15 @@ AppState ui_reader_goto_touch(int x, int y, BookReader& reader,
 // ═══════════════════════════════════════════════════════════════════
 
 void ui_reader_toc_draw(BookReader& reader, int& tocScroll) {
-    // TOC is a full-screen overlay (header + list rows + scroll
-    // indicator + bottom bar). Was display_update_medium() → 6-cycle
-    // GC16 clear via the WP-0.2 shim (visible flash on every open and
-    // every Prev/Next scroll). Now Zone::FullScreen + StructuralRedraw
-    // → GL16 non-flashing. The close paths set s_overlayDismissed; the
-    // TOC item-select path additionally drives a chapter jump which
-    // already invalidates body/footer.
-    display_begin_frame();
-
+    // TOC is a tall overlay (header + list rows + scroll indicator +
+    // bottom bar). Was display_update_medium() → 6-cycle GC16 clear via
+    // the WP-0.2 shim (visible flash on every open and every Prev/Next
+    // scroll). Now Zone::Overlay + StructuralRedraw → GL16 non-flashing.
+    // The close paths set s_overlayDismissed; the TOC item-select path
+    // additionally drives a chapter jump which already invalidates
+    // body/footer.
+    tall_overlay_begin();
     display_set_font_size(2);  // chrome always in Inter
-    display_fill_screen(15);
     drawHeader("Table of Contents", true);
 
     int y = HEADER_HEIGHT + MARGIN_Y;
@@ -930,8 +928,7 @@ void ui_reader_toc_draw(BookReader& reader, int& tocScroll) {
     }
 
     drawBottomBar("[ Back to Reading ]");
-    display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
-    display_flush();
+    tall_overlay_flush();
     setNeedsRedraw(false);
 }
 
