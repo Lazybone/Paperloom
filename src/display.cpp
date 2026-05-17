@@ -836,9 +836,11 @@ void display_flush() {
     // its counter has hit its threshold; if yes, that zone's intent is
     // upgraded to AntiGhost (→ MODE_GC16 on the zone's rect only). The
     // full-clear path runs only when Zone::FullScreen is the one that
-    // escalated (it genuinely covers the whole panel), or when MULTIPLE
-    // dirty zones escalated in the same flush (cheaper to do one full
-    // clear than two-plus per-zone GC16 cycles).
+    // escalated (it genuinely covers the whole panel), or when ALL dirty
+    // zones escalated in the same flush (and there are at least two — a
+    // single full clear consolidates the anti-ghost work and the
+    // poweron/off bracket, whereas a partial mix of escalated and
+    // non-escalated zones is still cheaper per-zone).
     if (!isFullRefresh) {
         int dirty_count = 0;
         int escalated_count = 0;
@@ -858,8 +860,9 @@ void display_flush() {
         // is to keep a single zone's anti-ghost cost local to that zone —
         // a lone header escalation must run GC16 on the header rect only,
         // not on the entire panel. Only when 2+ zones escalate in the same
-        // flush does a single full-clear become cheaper than two-plus
-        // per-zone GC16 calls.
+        // flush — and they are all of the dirty zones — does a single
+        // full-clear become cheaper than per-zone GC16 calls; a partial
+        // mix still runs per-zone.
         if (escalated_count > 1 && escalated_count == dirty_count) {
             isFullRefresh = true;
         }
