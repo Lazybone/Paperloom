@@ -18,83 +18,101 @@ namespace {
 
 std::unique_ptr<KosyncSyncCoordinator> g_coordinator;
 
-// RAII helper that brings WiFi up for the duration of a sync call and tears
-// it back down on scope exit — but only if this guard was the one that
-// established the connection. If WiFi is already connected (e.g. user is in
-// the WiFi-Upload screen), we reuse the existing session and leave it alone.
+// Stateful poll-based WiFi guard. Replaces the old blocking RAII guard.
 //
-// Mirrors the connect-wait loop from ui_update.cpp::ui_ota_tick() so both
-// flows behave consistently. The 10 s budget matches OTA.
+// Usage:
+//   WifiSyncGuard wifi(s);
+//   auto br = wifi.begin();          // non-blocking start
+//   while (...) { auto pr = wifi.poll(); ... }  // called once per tick
+//   wifi.release();                  // explicit teardown (destructor is fallback)
+//
+// If WiFi is already connected (e.g. user is in WiFi-Upload screen), begin()
+// returns AlreadyConnected and release() is a no-op (we don't own the radio).
 class WifiSyncGuard {
 public:
-    enum class Result { Connected, NoCredentials, ConnectFailed };
+    enum class BeginResult { Started, NoCredentials, AlreadyConnected };
+    enum class PollResult  { WaitingShort, Connected, Failed };
 
-    explicit WifiSyncGuard(const Settings& s) {
+    explicit WifiSyncGuard(const Settings& s) : ssid_(s.wifiSSID), pass_(s.wifiPass) {}
+
+    ~WifiSyncGuard() { release(); }
+
+    WifiSyncGuard(const WifiSyncGuard&)            = delete;
+    WifiSyncGuard& operator=(const WifiSyncGuard&) = delete;
+
+    // Non-blocking start. Sets internal state so subsequent poll() can be called.
+    BeginResult begin() {
         if (WiFi.status() == WL_CONNECTED) {
-            // Someone else owns the radio (WiFi upload, OTA). Reuse and do
-            // not tear down on destruct.
-            result_ = Result::Connected;
-            return;
+            return BeginResult::AlreadyConnected;
         }
-        if (s.wifiSSID.length() == 0) {
-            result_ = Result::NoCredentials;
-            return;
+        if (ssid_.length() == 0) {
+            return BeginResult::NoCredentials;
         }
-        // Diagnostic: snapshot internal heap state before AND after WiFi.begin
-        // so we can tell whether the WPA2 stack itself starves DMA-capable
-        // internal RAM. Previous run showed 28 KB largest free block before
-        // begin() yet `esp-sha: Failed to allocate buf memory` still fired,
-        // so the working hypothesis is that the WiFi task allocates the
-        // remaining DMA-cap RAM in the first ~144 ms after begin().
         Serial.printf("[kosync_sync] heap before WiFi.begin: dma_free=%u dma_largest=%u\n",
                       static_cast<unsigned>(heap_caps_get_free_size(
                           MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
                       static_cast<unsigned>(heap_caps_get_largest_free_block(
                           MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)));
-
         WiFi.mode(WIFI_STA);
-        WiFi.begin(s.wifiSSID.c_str(), s.wifiPass.c_str());
-        unsigned long start = millis();
+        WiFi.begin(ssid_.c_str(), pass_.c_str());
+        startMs_     = millis();
+        weBroughtUp_ = true;     // tentativ; release() berücksichtigt es
+        return BeginResult::Started;
+    }
 
-        // Poll heap every 50 ms for the first 500 ms to catch the moment
-        // the WPA2 4-way handshake consumes its working memory.
-        for (int i = 0; i < 10 && WiFi.status() != WL_CONNECTED; ++i) {
-            delay(50);
+    // Called once per UI tick while in WaitingWifi phase. Non-blocking.
+    PollResult poll() {
+        wl_status_t st = WiFi.status();
+
+        // Diagnostik fuer DMA-Pressure-Hypothese (siehe historisches Log).
+        // Nur in den ersten ~500 ms loggen — kein Spam ueber das gesamte
+        // 10-s-Budget.
+        uint32_t age = millis() - startMs_;
+        if (age <= 500 && (age / 50) != lastLoggedSlot_) {
+            lastLoggedSlot_ = age / 50;
             Serial.printf("[kosync_sync] heap t=%lums: dma_largest=%u status=%d\n",
-                          millis() - start,
+                          age,
                           static_cast<unsigned>(heap_caps_get_largest_free_block(
                               MALLOC_CAP_INTERNAL | MALLOC_CAP_DMA)),
-                          static_cast<int>(WiFi.status()));
+                          static_cast<int>(st));
         }
 
-        while (WiFi.status() != WL_CONNECTED && millis() - start < 10000) {
-            delay(250);
+        if (st == WL_CONNECTED) {
+            return PollResult::Connected;
         }
-        if (WiFi.status() == WL_CONNECTED) {
-            weBroughtUp_ = true;
-            result_ = Result::Connected;
-        } else {
-            WiFi.disconnect(true);
-            WiFi.mode(WIFI_OFF);
-            result_ = Result::ConnectFailed;
+        if (st == WL_NO_SSID_AVAIL || st == WL_CONNECT_FAILED) {
+            return PollResult::Failed;
         }
+        // WL_DISCONNECTED / WL_IDLE_STATUS / WL_SCAN_COMPLETED: weiter warten.
+        return PollResult::WaitingShort;
     }
 
-    ~WifiSyncGuard() {
-        if (weBroughtUp_) {
+    // Tear WiFi back down — only if we were the ones that brought it up.
+    // Idempotent.
+    void release() {
+        if (released_) return;
+        if (weBroughtUp_ && WiFi.status() != WL_CONNECTED) {
+            // begin() wurde gerufen, aber wir haben nie Connected gesehen
+            // (oder die Verbindung ist abgerissen). WiFi-Stack trotzdem
+            // sauber abreissen.
+            WiFi.disconnect(true);
+            WiFi.mode(WIFI_OFF);
+        } else if (weBroughtUp_) {
             WiFi.disconnect(true);
             WiFi.mode(WIFI_OFF);
         }
+        released_ = true;
     }
 
-    WifiSyncGuard(const WifiSyncGuard&)            = delete;
-    WifiSyncGuard& operator=(const WifiSyncGuard&) = delete;
-
-    Result result() const { return result_; }
+    bool weBroughtUp() const { return weBroughtUp_ && !released_; }
 
 private:
-    Result result_       = Result::ConnectFailed;
-    bool   weBroughtUp_  = false;
+    String   ssid_;
+    String   pass_;
+    uint32_t startMs_        = 0;
+    uint32_t lastLoggedSlot_ = UINT32_MAX;
+    bool     weBroughtUp_    = false;
+    bool     released_       = false;
 };
 
 // Divergence thresholds. Local-vs-remote progress is considered convergent
@@ -268,21 +286,35 @@ SyncResult KosyncSyncCoordinator::syncNow() {
 
     // 3. Bring WiFi up for the duration of this call. The guard tears it
     //    back down on scope exit if we were the ones who connected.
+    //
+    // Transitional: this synchronous wait stays here until syncNow() is
+    // removed in Task 8. Mirrors the old behavior using the new begin/poll
+    // API so the WifiSyncGuard refactor lands compile-clean.
     WifiSyncGuard wifi(s);
-    switch (wifi.result()) {
-        case WifiSyncGuard::Result::NoCredentials:
-            Serial.printf("[kosync_sync] sync: no WiFi creds\n");
-            r.toast = "WLAN nicht konfiguriert";
-            busy_.store(false);
-            return r;
-        case WifiSyncGuard::Result::ConnectFailed:
+    auto br = wifi.begin();
+    if (br == WifiSyncGuard::BeginResult::NoCredentials) {
+        Serial.printf("[kosync_sync] sync: no WiFi creds\n");
+        r.toast = "WLAN nicht konfiguriert";
+        busy_.store(false);
+        return r;
+    }
+    if (br == WifiSyncGuard::BeginResult::Started) {
+        const uint32_t deadline = millis() + 10000;
+        WifiSyncGuard::PollResult pr;
+        do {
+            pr = wifi.poll();
+            if (pr == WifiSyncGuard::PollResult::Connected) break;
+            if (pr == WifiSyncGuard::PollResult::Failed)    break;
+            delay(50);
+        } while (millis() < deadline);
+        if (pr != WifiSyncGuard::PollResult::Connected) {
             Serial.printf("[kosync_sync] sync: WiFi connect failed\n");
             r.toast = "Sync fehlgeschlagen: Kein WLAN";
             busy_.store(false);
             return r;
-        case WifiSyncGuard::Result::Connected:
-            break;
+        }
     }
+    // br == AlreadyConnected → fall through, no wait needed.
 
     KosyncClient client(s.kosyncServer, s.kosyncUser, s.kosyncKey);
 
@@ -409,21 +441,35 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
 
     // Bring WiFi up only after cheap checks pass. The guard tears it down
     // on scope exit if we connected here.
+    //
+    // Transitional: same synchronous wait as syncNow() — mirrors old behavior
+    // using the new begin/poll API so the WifiSyncGuard refactor lands
+    // compile-clean.
     WifiSyncGuard wifi(s);
-    switch (wifi.result()) {
-        case WifiSyncGuard::Result::NoCredentials:
-            Serial.printf("[kosync_sync] resolve: no WiFi creds\n");
-            r.toast = "WLAN nicht konfiguriert";
-            busy_.store(false);
-            return r;
-        case WifiSyncGuard::Result::ConnectFailed:
+    auto br = wifi.begin();
+    if (br == WifiSyncGuard::BeginResult::NoCredentials) {
+        Serial.printf("[kosync_sync] resolve: no WiFi creds\n");
+        r.toast = "WLAN nicht konfiguriert";
+        busy_.store(false);
+        return r;
+    }
+    if (br == WifiSyncGuard::BeginResult::Started) {
+        const uint32_t deadline = millis() + 10000;
+        WifiSyncGuard::PollResult pr;
+        do {
+            pr = wifi.poll();
+            if (pr == WifiSyncGuard::PollResult::Connected) break;
+            if (pr == WifiSyncGuard::PollResult::Failed)    break;
+            delay(50);
+        } while (millis() < deadline);
+        if (pr != WifiSyncGuard::PollResult::Connected) {
             Serial.printf("[kosync_sync] resolve: WiFi connect failed\n");
             r.toast = "Sync fehlgeschlagen: Kein WLAN";
             busy_.store(false);
             return r;
-        case WifiSyncGuard::Result::Connected:
-            break;
+        }
     }
+    // br == AlreadyConnected → fall through, no wait needed.
 
     KosyncClient client(s.kosyncServer, s.kosyncUser, s.kosyncKey);
 
