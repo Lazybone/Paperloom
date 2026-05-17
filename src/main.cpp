@@ -26,6 +26,7 @@
 #include "ui/ui_wifi_setup.h"
 #include "kosync_sync.h"
 #include "ui/ui_toast.h"
+#include "serial_console.h"
 #include "ui/ui_reader_kosync_setup.h"
 #include "ui/ui_reader_sync_conflict.h"
 #include "ui/ui_reader_sync_progress.h"
@@ -1352,6 +1353,9 @@ void button_action_execute(uint8_t action) {
 }
 
 void loop() {
+    // ── Serial console (USB-CDC credential setup, always) ────────────
+    serial_console_tick();
+
     // ── Toast cooldown (per-tick, always) ────────────────────────────
     ui_toast_tick();
 

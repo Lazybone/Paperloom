@@ -592,3 +592,20 @@ bool settings_save() {
 Settings& settings_get() {
     return _settings;
 }
+
+bool settings_set_wifi(const String& ssid, const String& pass) {
+    _settings.wifiSSID = ssid;
+    _settings.wifiPass = pass;
+    return settings_save();
+}
+
+bool settings_set_kosync(const String& server, const String& user,
+                         const String& md5key, const String& device) {
+    _settings.kosyncServer = normalize_https_scheme(server);
+    _settings.kosyncUser   = user;
+    _settings.kosyncKey    = md5key;
+    if (device.length() > 0) {
+        _settings.kosyncDeviceName = device;
+    }
+    return settings_save();
+}

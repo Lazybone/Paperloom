@@ -60,3 +60,10 @@ void settings_init();           // Load from SD or create defaults
 bool settings_save();           // Write to SD as JSON; false on IO failure
 Settings& settings_get();       // Reference to live settings
 void settings_set_default();    // Reset to factory defaults
+
+// Narrow mutators for serial-console credential setup.
+// Each mutates the relevant fields and calls settings_save().
+// Returns the result of settings_save() (false = IO failure).
+bool settings_set_wifi(const String& ssid, const String& pass);
+bool settings_set_kosync(const String& server, const String& user,
+                         const String& md5key, const String& device);
