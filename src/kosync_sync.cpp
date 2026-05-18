@@ -357,8 +357,13 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
         snapshot_local(reader_, s, pendingLocal_);
     }
 
+    // Plan H: release the BookReader before the TLS push handshake, then
+    // restore afterwards. applyRemoteProgress (above, if !keepLocal) needs
+    // the reader open, so the release must happen after that call.
+    reader_.releaseForSync();
     String err;
     int ps = client.pushProgress(hash, pendingLocal_, err);
+    reader_.restoreAfterSync();
 
     const char* successMsg = keepLocal
                                  ? "Sync ok (Server aktualisiert)"
@@ -430,7 +435,7 @@ bool KosyncSyncCoordinator::tick() {
         if (wifi_) wifi_->release();
         client_.reset();
         busy_.store(false);
-        reader_.restoreParserAfterSync();
+        reader_.restoreAfterSync();
         enterPhase(SyncPhase::Cancelled);
     } else {
         switch (phase_) {
@@ -466,12 +471,11 @@ void KosyncSyncCoordinator::runHashing() {
         finishWithToast("KoSync nicht konfiguriert", false);
         return;
     }
-    // WP-10: free EPUB-parser memory (~18 KB internal DMA-RAM) so the
-    // WiFi stack can initialize from reader-context. We restore the
-    // parser in finishWithToast()/finishConflict() before returning
-    // control to the dispatcher/UI.
-    Serial.printf("[kosync_sync] releasing parser before WiFi.begin\n");
-    reader_.releaseParserForSync();
+    // WP-10 Plan H: fully close the BookReader (parser + cached state) so
+    // all reader DMA-cap RAM is freed before WiFi.begin. We restore in
+    // finishWithToast()/finishConflict() before returning to the UI.
+    Serial.printf("[kosync_sync] releasing BookReader before WiFi.begin\n");
+    reader_.releaseForSync();
 
     wifi_.reset(new WifiSyncGuard(s));
     auto br = wifi_->begin();
@@ -588,8 +592,8 @@ void KosyncSyncCoordinator::finishWithToast(const String& toast, bool success) {
     if (wifi_) wifi_->release();
     client_.reset();
     busy_.store(false);
-    Serial.printf("[kosync_sync] restoring parser after sync\n");
-    reader_.restoreParserAfterSync();
+    Serial.printf("[kosync_sync] restoring BookReader after sync\n");
+    reader_.restoreAfterSync();
     enterPhase(success ? SyncPhase::Done : SyncPhase::Failed);
 }
 
@@ -600,11 +604,11 @@ void KosyncSyncCoordinator::finishConflict() {
     pendingResult_.local       = pendingLocal_;
     pendingResult_.remote      = pendingRemote_;
     // wifi_ + busy_ bleiben aktiv — resolveConflict() reused beide.
-    // Parser must be open before AwaitConflict because the user's
+    // BookReader must be open before AwaitConflict because the user's
     // resolveConflict choice may trigger applyRemoteProgress which
     // reads the EPUB.
-    Serial.printf("[kosync_sync] restoring parser before conflict dialog\n");
-    reader_.restoreParserAfterSync();
+    Serial.printf("[kosync_sync] restoring BookReader before conflict dialog\n");
+    reader_.restoreAfterSync();
     enterPhase(SyncPhase::AwaitConflict);
 }
 
@@ -624,9 +628,9 @@ void KosyncSyncCoordinator::cancelIfBusy() {
     if (wifi_) wifi_->release();
     client_.reset();
     busy_.store(false);
-    // If we cancelled mid-sync, the parser is in released state. Restore
+    // If we cancelled mid-sync, the BookReader is in released state. Restore
     // it so the reader is usable on resume.
-    reader_.restoreParserAfterSync();
+    reader_.restoreAfterSync();
     enterPhase(SyncPhase::Idle);
     lastPhase_ = SyncPhase::Idle;
 }

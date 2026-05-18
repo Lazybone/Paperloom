@@ -112,11 +112,13 @@ public:
     // redraw (caller's responsibility). Persists via saveProgress() on success.
     ApplyResult applyRemoteProgress(int chapter, int page, float percentage);
 
-    // WP-10: temporarily release parser memory during sync. See EpubParser
-    // for rationale. Safe to call while a book is open; caller must invoke
-    // restoreParserAfterSync() before any chapter navigation.
-    void releaseParserForSync();
-    bool restoreParserAfterSync();
+    // WP-10 Plan H: full BookReader release for sync. Closes the EPUB
+    // entirely (parser + cached state), freeing all DMA-cap RAM the
+    // reader was holding. Must be paired with restoreAfterSync(), which
+    // re-opens the book at the same chapter+page. Cost: ~600 ms re-open
+    // delay when sync completes (one-time, rare).
+    void releaseForSync();
+    bool restoreAfterSync();
 
 private:
     EpubParser _parser;
@@ -172,6 +174,14 @@ private:
     String _documentHash;
     uint32_t _lastSyncTimestamp = 0;
     size_t _kosyncEpubSize = 0;
+
+    // Plan H full-book-release state. Set in releaseForSync(), cleared in
+    // restoreAfterSync(). Stored separately from _filepath/_currentChapter
+    // because closeBook() zeros those out.
+    bool   _releasedForSync = false;
+    String _syncSavedFilepath;
+    int    _syncSavedChapter = 0;
+    int    _syncSavedPage = 0;
 
     void loadChapter(int chapter);
     void updatePageLines();

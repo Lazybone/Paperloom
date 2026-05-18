@@ -75,20 +75,11 @@ public:
     const std::vector<String>& getChapterTitleCache() const { return _chapterTitleCache; }
     void setChapterTitleCache(const std::vector<String>& titles);
 
-    // WP-10 memory-pressure helpers. release_for_sync() destroys all
-    // in-memory state (spine/toc/etc.) and force-shrinks vector capacity,
-    // freeing ~18 KB internal DMA-cap RAM so the WiFi stack can init
-    // from reader-context. restore_after_sync() re-runs open() with the
-    // same filepath. Both are idempotent and safe to call mid-read.
-    void release_for_sync();
-    bool restore_after_sync();
-
 private:
     ZipReader _zip;
     String _title;
     String _author;
     String _basePath;
-    String _openFilepath;   // set by open(), used by restore_after_sync()
     std::vector<SpineItem> _spine;
     std::vector<ManifestItem> _manifest;
     std::vector<TocEntry> _toc;
