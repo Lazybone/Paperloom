@@ -388,11 +388,15 @@ void EpubParser::close() {
     _title = "";
     _author = "";
     _basePath = "";
-    _spine.clear();
-    _manifest.clear();
-    _toc.clear();
+    // Use swap-with-empty to release vector capacity (not just element count).
+    // .clear() leaves the underlying buffer allocated; on internal DMA-cap
+    // RAM that's the difference between Plan H working or not for the
+    // sync-from-reader case.
+    std::vector<SpineItem>().swap(_spine);
+    std::vector<ManifestItem>().swap(_manifest);
+    std::vector<TocEntry>().swap(_toc);
+    std::vector<String>().swap(_chapterTitleCache);
     _coverImagePath = "";
-    _chapterTitleCache.clear();
 }
 
 bool EpubParser::parseContainer() {
