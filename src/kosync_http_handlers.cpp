@@ -32,6 +32,13 @@
 
 #include "settings.h"
 #include "tls_certs.h"
+#include "kosync_validation.h"
+#include "kosync_hash.h"
+#include "reader.h"
+
+// Defined in main.cpp — the single live BookReader. Read-only access from
+// the diagnostic /api/kosync-hash endpoint below.
+extern BookReader reader;
 
 namespace {
 
@@ -59,19 +66,12 @@ String normalize_https_scheme(const String& url) {
     return url;
 }
 
-// Matches ^[A-Za-z0-9_.-]{1,32}$.
+// Matches ^[A-Za-z0-9_.-]{1,32}$ — shared with KosyncClient via
+// kosync_validation.h so both validation sites stay in lock-step.
+// Anonymous-namespace member already has internal linkage; no `inline`
+// needed (the compiler inlines small one-liners anyway with -O2).
 bool is_valid_kosync_user(const String& u) {
-    const size_t n = u.length();
-    if (n == 0 || n > 32) return false;
-    for (size_t i = 0; i < n; ++i) {
-        const char c = u.charAt(i);
-        const bool ok = (c >= 'A' && c <= 'Z') ||
-                        (c >= 'a' && c <= 'z') ||
-                        (c >= '0' && c <= '9') ||
-                        c == '_' || c == '.' || c == '-';
-        if (!ok) return false;
-    }
-    return true;
+    return kosync_validation::is_valid_username(u);
 }
 
 // Compute MD5(plaintext) → 32-char lowercase hex string.
@@ -351,6 +351,101 @@ void handle_post_register() {
                   (code == 200 || code == 201) ? "ok" : "fail");
 }
 
+// Diagnostic endpoint — returns the KoSync document hash for either the
+// currently-open book (no path arg) or an arbitrary EPUB on the SD card
+// (?path=/books/foo.epub). Useful when the conflict dialog shows
+// nonsense remote data: compare the hash here against what's stored on
+// the kosync server for the same hash to confirm the device is asking
+// about the book it thinks it's asking about.
+//
+// No secrets, no PII — hash is a 32-char KOReader-canonical partial-MD5
+// over up to 12 × 1 KiB chunks at non-contiguous offsets (see
+// kosync_hash.cpp). Title and filepath are already user-visible elsewhere.
+//
+// Concurrency: this handler runs on the same Arduino loop task as the
+// kosync sync coordinator (no xTaskCreate in the codebase), so the
+// non-reentrant kosync_compute_document_hash() is safe here. WiFi-upload
+// mode and an active kosync sync are also mutually exclusive at the UI
+// state-machine level (STATE_WIFI vs STATE_SYNC_PROGRESS), so the
+// diagnostic endpoint cannot be hit while runHashing() is in flight.
+void handle_get_hash() {
+    String title;
+    String filepath;
+    String hash;
+
+    if (g_server && g_server->hasArg("path")) {
+        // Hash a specific file (file-browser UI use case). Reject paths
+        // that don't look like an EPUB on the SD card root — defensive
+        // against `?path=/etc/passwd` style probing even though the SD
+        // filesystem doesn't expose host paths. Also block dot-prefixed
+        // segments (e.g. `/.progress`, `/.settings.json`) so the
+        // diagnostic endpoint cannot be used to fingerprint internal
+        // state files via their partial-MD5.
+        filepath = g_server->arg("path");
+        if (filepath.length() == 0 || filepath.charAt(0) != '/' ||
+            filepath.indexOf("..") >= 0 ||
+            filepath.indexOf("/.") >= 0) {
+            send_json(400, "{\"ok\":false,\"error\":\"bad path\"}");
+            return;
+        }
+        hash  = kosync_compute_document_hash(filepath);
+        // No title lookup for arbitrary files — the UI already shows
+        // the filename next to the hash, and parsing the EPUB just for
+        // a title here would double-read the file.
+        title = "";
+    } else {
+        // Default: currently-open book.
+        title    = reader.getTitle();
+        filepath = reader.getFilepath();
+        hash     = reader.getDocumentHash();
+    }
+
+    // JSON-escape: titles can contain ", \ and control chars. Cheap escape.
+    auto esc = [](const String& s) -> String {
+        String o;
+        o.reserve(s.length() + 8);
+        for (size_t i = 0; i < s.length(); ++i) {
+            char c = s.charAt(i);
+            switch (c) {
+                case '"':  o += "\\\""; break;
+                case '\\': o += "\\\\"; break;
+                case '\n': o += "\\n";  break;
+                case '\r': o += "\\r";  break;
+                case '\t': o += "\\t";  break;
+                default:
+                    if (static_cast<unsigned char>(c) < 0x20) {
+                        // Cast back to unsigned char before formatting:
+                        // on platforms where `char` is signed (most ARM/
+                        // Xtensa toolchains), passing a negative char to
+                        // `%04x` sign-extends to int and emits a wrong
+                        // multi-byte hex escape. The earlier cast in the
+                        // comparison didn't propagate to the format call.
+                        char b[8];
+                        snprintf(b, sizeof(b), "\\u%04x",
+                                 static_cast<unsigned char>(c));
+                        o += b;
+                    } else {
+                        o += c;
+                    }
+            }
+        }
+        return o;
+    };
+
+    String body;
+    body.reserve(256 + title.length() + filepath.length());
+    body += "{\"ok\":true,\"hash\":\"";
+    body += esc(hash);
+    body += "\",\"title\":\"";
+    body += esc(title);
+    body += "\",\"filepath\":\"";
+    body += esc(filepath);
+    body += "\",\"hashLen\":";
+    body += String(hash.length());
+    body += "}";
+    send_json(200, body);
+}
+
 }  // namespace
 
 void kosync_http_register_handlers(WebServer& server) {
@@ -358,4 +453,5 @@ void kosync_http_register_handlers(WebServer& server) {
     server.on("/api/kosync-settings", HTTP_GET,  handle_get);
     server.on("/api/kosync-settings", HTTP_POST, handle_post);
     server.on("/api/kosync-register", HTTP_POST, handle_post_register);
+    server.on("/api/kosync-hash",     HTTP_GET,  handle_get_hash);
 }

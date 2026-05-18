@@ -99,6 +99,13 @@ private:
     void finishConflict();
     void tryRestoreReader_();
 
+    // Threading contract: this coordinator is NOT thread-safe for the
+    // SyncPhase fields below. busy_ and cancelRequested_ are std::atomic
+    // because UI touch handlers can flip them, but every mutation of
+    // phase_/lastPhase_/failedAtPhase_/pendingResult_/wifi_/client_ MUST
+    // happen on the main Arduino loop task (tick() is the sole owner).
+    // If a future change adds an ISR or second task that touches these,
+    // upgrade them to atomic or guard with a mutex.
     BookReader&                    reader_;
     std::atomic<bool>              busy_{false};
     std::atomic<bool>              cancelRequested_{false};
@@ -107,6 +114,13 @@ private:
     SyncPhase                      failedAtPhase_  = SyncPhase::Idle;
     KosyncProgress                 pendingLocal_{};
     KosyncProgress                 pendingRemote_{};
+    // Layout metrics captured at snapshot time so cross-chapter page
+    // estimation during runPulling() still works after releaseForSync()
+    // has closed the book and zeroed the reader's internal layout state.
+    // Both encode XPath text-offsets symmetrically (push and pull use the
+    // same values), making Paperloom→Paperloom sync round-trippable.
+    int                            snapshotLinesPerPage_ = 0;
+    int                            snapshotTotalPages_   = 0;
     String                         hash_;
     SyncResult                     pendingResult_{};
     uint32_t                       wifiBudgetStartMs_ = 0;

@@ -34,6 +34,10 @@ public:
     int  getTotalPages() const { return _totalPages; }
     int  getCurrentChapter() const { return _currentChapter; }
     int  getTotalChapters() const { return _parser.getChapterCount(); }
+    // Lines per page for the currently-loaded chapter. Depends on
+    // fontSizeLevel, lineSpacing, and orientation — varies dynamically.
+    // Returns 1 as a safe floor if no chapter is laid out yet.
+    int  getLinesPerPage() const { return _linesPerPage; }
     int  getTocCount() const { return _parser.getTocCount(); }
 
     bool nextPage();
@@ -73,6 +77,13 @@ public:
     String getChapterTitle(int index);
     String getTocLabel(int index);
     int getTocChapterIndex(int index);
+    // Find the NCX TOC label that points to (or contains) the given
+    // spine-index chapter. Walks TOC entries and returns the label
+    // whose chapterIndex matches, falling back to the nearest TOC
+    // entry that precedes the spine index. Returns "" when no TOC
+    // entry covers this position (common for front-matter spine
+    // items that have no NCX entry).
+    String getTocLabelForChapter(int spineIndex);
     const std::vector<SpineItem>& getSpine() const { return _parser.getSpine(); }
 
     // For font size changes
@@ -117,7 +128,11 @@ public:
     // reader was holding. Must be paired with restoreAfterSync(), which
     // re-opens the book at the same chapter+page. Cost: ~600 ms re-open
     // delay when sync completes (one-time, rare).
-    void releaseForSync();
+    // Returns false if saveProgress() failed — in that case the book is
+    // NOT closed (kept open so the user keeps reading state intact) and
+    // the caller must abort the sync. true = released, restoreAfterSync()
+    // will reopen.
+    bool releaseForSync();
     bool restoreAfterSync();
 
 private:

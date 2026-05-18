@@ -756,6 +756,15 @@ function makeRow(it) {
   const actions = document.createElement('div');
   actions.className = 'actions';
   if (!it.isDir) {
+    // EPUB-only: KoSync hash diagnostic button.
+    if (/\.epub$/i.test(it.name)) {
+      const hashBtn = document.createElement('button');
+      hashBtn.className = 'btn sm ghost';
+      hashBtn.title = 'Show KoSync hash';
+      hashBtn.textContent = '#';
+      hashBtn.onclick = () => showFileHash(joinPath(currentPath, it.name), row);
+      actions.appendChild(hashBtn);
+    }
     const dl = document.createElement('button');
     dl.className = 'btn sm ghost';
     dl.title = 'Download';
@@ -846,7 +855,7 @@ const BUTTON_ACTIONS = [
   {v: 4, label: 'Next page'},
   {v: 5, label: 'Prev page'},
   {v: 6, label: 'Menu'},
-  {v: 7, label: 'Sync Fortschritt'}
+  {v: 7, label: 'KoReader Sync'}
 ];
 
 function populateButtonActionSelects() {
@@ -980,6 +989,45 @@ async function loadSettings() {
   suppressDirty = false;
   // WP-6a: pull KoSync card state alongside the main settings.
   loadKosync();
+}
+
+// Fetch + display the KoSync hash for a specific file. Hash is appended
+// as a second line under the row, click-to-copy. Idempotent — repeated
+// clicks on the same row replace the existing line instead of stacking.
+async function showFileHash(path, row) {
+  let line = row.querySelector('.hash-line');
+  if (!line) {
+    line = document.createElement('div');
+    line.className = 'hash-line';
+    line.style.gridColumn = '1 / -1';
+    line.style.fontFamily = 'monospace';
+    line.style.fontSize   = '12px';
+    line.style.opacity    = '0.75';
+    line.style.padding    = '2px 0 4px 44px';
+    line.style.userSelect = 'all';
+    line.style.cursor     = 'copy';
+    row.appendChild(line);
+  }
+  line.textContent = 'hash: computing …';
+  try {
+    const r = await fetch('/api/kosync-hash?path=' + encodeURIComponent(path));
+    const j = await r.json();
+    if (j && j.ok && j.hash) {
+      line.textContent = 'hash: ' + j.hash;
+      line.onclick = () => {
+        if (navigator.clipboard) {
+          navigator.clipboard.writeText(j.hash).then(
+            () => toast('Hash copied'),
+            () => toast('Copy failed', true)
+          );
+        }
+      };
+    } else {
+      line.textContent = 'hash: ' + ((j && j.error) || 'unavailable');
+    }
+  } catch (e) {
+    line.textContent = 'hash: ' + e.message;
+  }
 }
 
 async function loadKosync() {

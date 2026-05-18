@@ -24,10 +24,18 @@
 #include "config.h"
 #include "../display.h"
 #include "../kosync_sync.h"
+#include "../reader.h"
 
 #include <Arduino.h>
 #include <stdio.h>
 #include <time.h>
+
+// BookReader is owned by main.cpp; the conflict dialog reads chapter
+// titles from it to surface narrative names alongside the raw spine
+// index (e.g. "Kap. 12  •  Chapter 4: Encounter at Dusk"). The reader
+// is guaranteed to be re-opened by restoreAfterSync() before this
+// dialog is shown — see runPulling() in kosync_sync.cpp.
+extern BookReader reader;
 
 // ─── Layout constants (portrait 540 x 960) ─────────────────────────
 namespace {
@@ -38,29 +46,37 @@ constexpr int H = PORTRAIT_H;
 // Body region below header, above button bar.
 constexpr int BODY_TOP = HEADER_HEIGHT + MARGIN_Y;
 
-// Bottom button bar (mirrors ui_reader_kosync_setup footer style).
-constexpr int FOOTER_TOP = H - FOOTER_HEIGHT;
+// Dedicated footer height for this dialog — global FOOTER_HEIGHT (50) is
+// too tight for three side-by-side button labels at font level 2; bump
+// locally so the buttons have breathing room.
+constexpr int LOCAL_FOOTER_H = 84;
+constexpr int FOOTER_TOP     = H - LOCAL_FOOTER_H;
 
-// Three-button split across the full panel width:
-//   [Lokal behalten] [Remote übernehmen] [Abbrechen]
-// The cancel button gets the smallest slice (~22%), the two actions split
-// the remaining width roughly evenly.
-constexpr int BTN_CANCEL_W = 120;
-constexpr int BTN_LOCAL_W  = (W - BTN_CANCEL_W) / 2;
-constexpr int BTN_REMOTE_W = W - BTN_CANCEL_W - BTN_LOCAL_W;
-static_assert(BTN_LOCAL_W + BTN_REMOTE_W + BTN_CANCEL_W == W,
-              "sync-conflict footer must span exactly W");
+// Three EQUAL-WIDTH buttons. Labels are short ("Lokal" / "Remote" /
+// "Zurück") so they fit in 180 px each at font level 2 without truncation.
+// The detail of what each button does is conveyed by the column headers
+// and the title above the dialog.
+constexpr int BTN_W = W / 3;
+static_assert(BTN_W * 3 == W,
+              "sync-conflict footer must span exactly W (W must be /3)");
+constexpr int BTN_LOCAL_X  = 0;
+constexpr int BTN_REMOTE_X = BTN_W;
+constexpr int BTN_CANCEL_X = BTN_W * 2;
+
+// Intro line region (sub-title below the header).
+constexpr int INTRO_TOP = BODY_TOP;
+constexpr int INTRO_H   = 36;
 
 // Two-column layout for the comparison area.
-constexpr int COL_GAP   = 12;
+constexpr int COL_GAP   = 16;
 constexpr int COL_W     = (W - MARGIN_X * 2 - COL_GAP) / 2;
 constexpr int COL_LEFT_X  = MARGIN_X;
 constexpr int COL_RIGHT_X = MARGIN_X + COL_W + COL_GAP;
-constexpr int COL_TOP   = BODY_TOP + 40;   // leave room for an intro line
+constexpr int COL_TOP   = INTRO_TOP + INTRO_H + 8;
 constexpr int COL_H     = FOOTER_TOP - COL_TOP - MARGIN_Y;
 
 // Row layout inside each column: heading + 5 data rows.
-constexpr int COL_HEADING_OFFSET = 14;
+constexpr int COL_HEADING_H      = 38;
 constexpr int ROW_H              = 56;
 constexpr int ROW_LABEL_DY       = 18;   // label baseline below row top
 constexpr int ROW_VALUE_DY       = 40;   // value baseline below row top
@@ -108,12 +124,24 @@ void format_timestamp(uint32_t ts, char* out, size_t outLen) {
     }
 }
 
-// Render a centered label inside a button cell.
+// Render a centered label inside a button cell. Text-width-aware so a
+// label that still wouldn't fit (e.g. translated) is truncated with an
+// ellipsis instead of bleeding into the neighbour button.
 void draw_button(int x, int w, const char* label, uint8_t fg) {
-    const int tw = display_text_width(label);
+    const int maxW = w - 16;
+    String s(label);
+    if (display_text_width(s.c_str()) > maxW) {
+        while (s.length() > 1 &&
+               display_text_width((s + "…").c_str()) > maxW) {
+            s.remove(s.length() - 1);
+        }
+        s += "…";
+    }
+    const int tw = display_text_width(s.c_str());
     const int tx = x + (w - tw) / 2;
-    const int ty = FOOTER_TOP + FOOTER_HEIGHT - 14;
-    display_draw_text(tx, ty, label, fg);
+    // Vertically centre baseline in the local footer band.
+    const int ty = FOOTER_TOP + (LOCAL_FOOTER_H + display_font_height()) / 2 - 4;
+    display_draw_text(tx, ty, s.c_str(), fg);
 }
 
 // Draw label/value pair at (x, y). Label is rendered in mid-gray, value in
@@ -140,23 +168,49 @@ void draw_column(int colX, const char* heading, const KosyncProgress& p) {
     display_draw_rect(colX, COL_TOP, COL_W, COL_H, 0);
 
     // Column heading band
-    display_draw_filled_rect(colX + 1, COL_TOP + 1, COL_W - 2, 32, 13);
+    display_draw_filled_rect(colX + 1, COL_TOP + 1, COL_W - 2,
+                             COL_HEADING_H - 2, 13);
     const int hw = display_text_width(heading);
+    const int fh = display_font_height();
     display_draw_text(colX + (COL_W - hw) / 2,
-                      COL_TOP + COL_HEADING_OFFSET + 10,
+                      COL_TOP + (COL_HEADING_H + fh) / 2 - 4,
                       heading, 0);
-    display_draw_hline(colX, COL_TOP + 33, COL_W, 0);
+    display_draw_hline(colX, COL_TOP + COL_HEADING_H, COL_W, 0);
 
-    int y = COL_TOP + 38;
+    int y = COL_TOP + COL_HEADING_H + 6;
 
-    // Internal Paperloom convention is 0-based chapter/page (see SyncResult
-    // and the rest of the reader). Surface that to users as "Kap. N" with
-    // a "+1" so the dialog matches the on-screen page numbering, which is
-    // 1-based by the time it reaches the user.
+    // Show the TOC label as the primary "Kapitel" value when available —
+    // KOReader/CrossPoint/Readest all emit progress as a 1-indexed spine
+    // position (DocFragment[N]), but spine includes front-matter (cover,
+    // copyright, TOC, prologue, …) so the raw number doesn't match the
+    // narrative chapter the user thinks of. The NCX-derived chapter
+    // title is what the user actually recognises from the book's table
+    // of contents. Empty titles (typical for front-matter spine items
+    // without an NCX entry) fall back to the spine number "Kap. N",
+    // which still carries useful sync arithmetic.
     char buf[48];
 
-    snprintf(buf, sizeof(buf), "Kap. %d", p.chapter + 1);
-    draw_label_value(colX, y, "Kapitel", buf);
+    // Prefer the NCX TOC label (human-readable, e.g. "Chapter 4:
+    // Encounter at Dusk") over getChapterTitle() which scrapes the
+    // chapter XHTML's <title> tag and often returns internal IDs like
+    // "cSK" from publisher build pipelines. Fall back to <title> only
+    // when no TOC entry covers this spine position.
+    String chapterTitle = reader.getTocLabelForChapter(p.chapter);
+    if (chapterTitle.length() == 0) {
+        chapterTitle = reader.getChapterTitle(p.chapter);
+    }
+    if (chapterTitle.length() > 0) {
+        // Truncate to fit the column. ~28 chars keeps most titles on
+        // one line at font level 2; the renderer further clips visually
+        // if needed.
+        if (chapterTitle.length() > 28) {
+            chapterTitle = chapterTitle.substring(0, 27) + "…";
+        }
+        draw_label_value(colX, y, "Kapitel", chapterTitle.c_str());
+    } else {
+        snprintf(buf, sizeof(buf), "Kap. %d", p.chapter + 1);
+        draw_label_value(colX, y, "Kapitel", buf);
+    }
     y += ROW_H;
 
     snprintf(buf, sizeof(buf), "Seite %d", p.page + 1);
@@ -195,28 +249,32 @@ void ui_sync_conflict_draw() {
     display_fill_screen(15);
     drawHeader("Sync-Konflikt");
 
-    // Intro line
-    const char* intro =
-        "Lokaler und Remote-Fortschritt unterscheiden sich.";
+    // Short intro — the original "Lokaler und Remote-Fortschritt
+    // unterscheiden sich." overflowed the 480 px content width at font
+    // level 2 and clipped to "...und Remote-Fortschritt unterscheide".
+    // The column headers below already say "Lokal" / "Remote", so the
+    // intro just needs to flag the divergence.
+    const char* intro = "Fortschritt unterscheidet sich:";
     const int iw = display_text_width(intro);
     display_draw_text((W - iw) / 2,
-                      BODY_TOP + display_font_height() + 4,
+                      INTRO_TOP + (INTRO_H + display_font_height()) / 2 - 4,
                       intro, 0);
 
     // Two columns
     draw_column(COL_LEFT_X,  "Lokal",  g_data.local);
     draw_column(COL_RIGHT_X, "Remote", g_data.remote);
 
-    // Footer button bar (dark band with three centred labels).
-    display_draw_filled_rect(0, FOOTER_TOP, W, FOOTER_HEIGHT, 2);
-    int fx = 0;
-    draw_button(fx, BTN_LOCAL_W,  "Lokal behalten", 15);
-    fx += BTN_LOCAL_W;
-    display_draw_filled_rect(fx - 1, FOOTER_TOP + 4, 2, FOOTER_HEIGHT - 8, 10);
-    draw_button(fx, BTN_REMOTE_W, "Remote übernehmen", 15);
-    fx += BTN_REMOTE_W;
-    display_draw_filled_rect(fx - 1, FOOTER_TOP + 4, 2, FOOTER_HEIGHT - 8, 10);
-    draw_button(fx, BTN_CANCEL_W, "Abbrechen", 15);
+    // Footer button bar — light background (matches the rest of the UI),
+    // dark labels, top border + thin vertical separators between cells.
+    display_draw_filled_rect(0, FOOTER_TOP, W, LOCAL_FOOTER_H, 15);
+    display_draw_hline(0, FOOTER_TOP, W, 0);
+    draw_button(BTN_LOCAL_X,  BTN_W, "Lokal",    0);
+    display_draw_vline(BTN_REMOTE_X, FOOTER_TOP + 8,
+                       LOCAL_FOOTER_H - 16, 6);
+    draw_button(BTN_REMOTE_X, BTN_W, "Remote",   0);
+    display_draw_vline(BTN_CANCEL_X, FOOTER_TOP + 8,
+                       LOCAL_FOOTER_H - 16, 6);
+    draw_button(BTN_CANCEL_X, BTN_W, "Abbrechen", 0);
 
     display_begin_frame();
     display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);
@@ -248,8 +306,8 @@ AppState ui_sync_conflict_touch(int x, int y) {
 
     auto& coord = kosync_get_coordinator();
 
-    // [Lokal behalten]
-    if (x < BTN_LOCAL_W) {
+    // [Lokal]
+    if (x < BTN_REMOTE_X) {
         Serial.println("[sync-conflict] resolve: keep local");
         SyncResult res = coord.resolveConflict(true);
         ui_toast_show(res.toast, 2500, !res.success);
@@ -257,8 +315,8 @@ AppState ui_sync_conflict_touch(int x, int y) {
         return STATE_READER;
     }
 
-    // [Remote übernehmen]
-    if (x < BTN_LOCAL_W + BTN_REMOTE_W) {
+    // [Remote]
+    if (x < BTN_CANCEL_X) {
         Serial.println("[sync-conflict] resolve: take remote");
         SyncResult res = coord.resolveConflict(false);
         ui_toast_show(res.toast, 2500, !res.success);

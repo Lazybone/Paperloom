@@ -18,6 +18,7 @@
 #include "button_action.h"
 #include "state.h"
 #include "debug_trace.h"
+#include "mbedtls_psram_alloc.h"
 #include "ui/ui_library.h"
 #include "ui/ui_reader.h"
 #include "ui/ui_settings.h"
@@ -677,7 +678,26 @@ static void enterDeepSleep(bool triggeredByButton) {
     // WP-10: tear down any in-flight kosync sync before persisting state
     // and powering rails off. Idempotent — no-op if not busy.
     if (kosync_is_coordinator_initialized()) {
-        kosync_get_coordinator().cancelIfBusy();
+        auto& coord = kosync_get_coordinator();
+        coord.cancelIfBusy();
+        // cancelIfBusy() calls restoreAfterSync() internally. If that
+        // failed (SD removed, file deleted), the book is no longer open
+        // and resuming to STATE_READER would land on an empty reader.
+        // Force resume to STATE_LIBRARY in that case. STATE_SYNC_PROGRESS
+        // is included because the user may have triggered sleep while
+        // the sync progress screen was active, which would otherwise
+        // collapse to STATE_READER 25 lines below.
+        if (coord.restoreFailed()) {
+            Serial.printf("[main] sleep: kosync restore failed — "
+                          "resume to library\n");
+            if (appState == STATE_READER || appState == STATE_MENU ||
+                appState == STATE_GOTO   || appState == STATE_TOC ||
+                appState == STATE_BOOKMARKS ||
+                appState == STATE_SYNC_PROGRESS) {
+                appState = STATE_LIBRARY;
+            }
+            coord.clearRestoreFailed();
+        }
     }
 
     // Persist app state so wake can resume where we left off.
@@ -878,6 +898,11 @@ void setup() {
     Serial.println("\n=== T5 E-Reader Firmware (Portrait) ===");
     debug_trace_boot_report();
     debug_trace_mark("setup:start");
+
+    // Route mbedtls allocations to PSRAM BEFORE any TLS code runs (kosync,
+    // OTA, WiFi-cert-bundle load). Keeps the 16 KB+16 KB SSL record buffers
+    // out of the tight internal-DMA-RAM heap that the reader competes for.
+    mbedtls_psram_alloc_init();
 
     // Pro: SX1262 und GPS in sicheren Aus-Zustand zwingen, BEVOR der
     // gemeinsame SPI-Bus für die SD-Karte aufgebaut wird. Auf anderen

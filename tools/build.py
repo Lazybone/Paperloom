@@ -201,13 +201,22 @@ def copy_binary(out_paths: list[Path], dry_run: bool) -> None:
 def find_esptool() -> "list[str] | None":
     """Return a command prefix that invokes esptool, or None if it cannot be located.
 
-    Search order: PATH (`esptool.py`, `esptool`), `python -m esptool`, the
-    PlatformIO bundled copy under ~/.platformio/packages/tool-esptoolpy.
+    Search order: PATH (`esptool.py`, `esptool`), the PlatformIO penv python
+    (has esptool + rich_click pre-installed), the active python (`python -m
+    esptool`), and finally the PlatformIO bundled script run with whichever
+    python can import its deps.
     """
     for name in ("esptool.py", "esptool"):
         path = shutil.which(name)
         if path:
             return [path]
+
+    pio_python = Path.home() / ".platformio" / "penv" / "bin" / "python"
+    if pio_python.is_file() and subprocess.run(
+        [str(pio_python), "-m", "esptool", "--help"],
+        capture_output=True,
+    ).returncode == 0:
+        return [str(pio_python), "-m", "esptool"]
 
     if subprocess.run(
         [sys.executable, "-m", "esptool", "--help"],
@@ -219,7 +228,8 @@ def find_esptool() -> "list[str] | None":
         glob.glob(str(Path.home() / ".platformio" / "packages" / "tool-esptoolpy" / "esptool.py"))
     )
     if matches:
-        return [sys.executable, matches[0]]
+        runner = str(pio_python) if pio_python.is_file() else sys.executable
+        return [runner, matches[0]]
 
     return None
 

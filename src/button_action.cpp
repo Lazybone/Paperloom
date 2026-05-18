@@ -14,7 +14,7 @@ const char* button_action_name(uint8_t action) {
         case BTN_ACTION_NEXT_PAGE:        return "Next page";
         case BTN_ACTION_PREV_PAGE:        return "Prev page";
         case BTN_ACTION_MENU:             return "Menu";
-        case BTN_ACTION_KOSYNC_SYNC:      return "Sync Fortschritt";
+        case BTN_ACTION_KOSYNC_SYNC:      return "KoReader Sync";
         default:                          return "?";
     }
 }
@@ -23,7 +23,7 @@ const char* button_action_name(uint8_t action) {
 // the file-local static functions (page nav, sleep, state changes).
 //
 // WP-8: button_action_kosync_sync() is a public helper that mirrors the
-// reader-menu "Sync Fortschritt" flow. It is implemented here (rather than
+// reader-menu "KoReader Sync" flow. It is implemented here (rather than
 // inline in main.cpp's dispatcher) so the coordinator + UI dependencies stay
 // out of main.cpp and so it can be unit-tested in isolation. The dispatcher
 // in main.cpp must add:

@@ -16,10 +16,13 @@ struct KosyncProgress {
 };
 
 // Thin HTTPS wrapper around the kosync REST API. Uses ESP-IDF's esp_http_client
-// with a 2 KB TLS buffer (vs. WiFiClientSecure's 16 KB default) to fit in the
-// constrained heap available from reader-context. Credentials are validated in
-// the constructor; if validation fails, both API calls short-circuit to status 0
-// with a redacted error log.
+// with a small 2 KB HTTP body buffer (NOTE: the mbedtls TLS record buffer is
+// independent and sized at compile time via CONFIG_MBEDTLS_SSL_IN/OUT_CONTENT_LEN
+// in sdkconfig — not by buffer_size here). Trust anchor is pinned to the
+// PAPERLOOM_TRUSTED_ROOTS bundle (3 roots) rather than the full Mozilla bundle.
+// Redirects are disabled so auth headers cannot leak cross-host. Credentials
+// are validated in the constructor; if validation fails, both API calls
+// short-circuit to status 0 with a redacted error log.
 class KosyncClient {
 public:
     KosyncClient(const String& serverUrl,

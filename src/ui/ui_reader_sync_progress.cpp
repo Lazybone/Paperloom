@@ -197,7 +197,7 @@ const char* status_text_for(SyncPhase ph) {
 void ui_sync_progress_draw() {
     display_set_font_size(2);
     display_fill_screen(15);
-    drawHeader("Sync Fortschritt");
+    drawHeader("KoReader Sync");
 
     SyncPhase ph = kosync_is_coordinator_initialized()
                        ? kosync_get_coordinator().currentPhase()
@@ -219,13 +219,16 @@ void ui_sync_progress_draw() {
     const int sw = display_text_width(status);
     display_draw_text((W - sw) / 2, STATUS_LINE_Y, status, COLOR_TEXT_DETAIL);
 
-    // Footer-Button "Abbrechen"
-    display_draw_filled_rect(0, FOOTER_TOP, W, FOOTER_HEIGHT,
-                             s_cancelLatched ? 4 : 2);
+    // Footer-Button "Abbrechen" — light background to match the rest of
+    // the UI. Pressed state darkens to mid-grey for tactile feedback.
+    const uint8_t footerBg   = s_cancelLatched ? 11 : 15;
+    const uint8_t footerText = 0;
+    display_draw_filled_rect(0, FOOTER_TOP, W, FOOTER_HEIGHT, footerBg);
+    display_draw_hline(0, FOOTER_TOP, W, 0);
     const char* btn = "Abbrechen";
     const int bw = display_text_width(btn);
-    display_draw_text((W - bw) / 2, FOOTER_TOP + FOOTER_HEIGHT - 14, btn,
-                      COLOR_GLYPH_WHITE);
+    const int by = FOOTER_TOP + (FOOTER_HEIGHT + display_font_height()) / 2 - 4;
+    display_draw_text((W - bw) / 2, by, btn, footerText);
 
     display_begin_frame();
     display_mark_dirty(Zone::FullScreen, ChangeKind::StructuralRedraw);

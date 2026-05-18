@@ -10,7 +10,7 @@ Supported hardware:
 - [**LilyGo T5 E-Paper S3 Pro**](https://lilygo.cc/products/t5-e-paper-s3-pro) — with touch, frontlight, side button, battery gauge.
 - [**LilyGo T5 E-Paper S3 Pro Lite**](https://lilygo.cc/products/t5-e-paper-s3-pro-lite) — same screen, lighter peripherals.
 
-Version: **v0.2.4**
+Version: **v0.2.5**
 
 ---
 

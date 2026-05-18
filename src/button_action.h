@@ -29,7 +29,7 @@ const char* button_action_name(uint8_t action);
 // Safe to call from main loop context.
 void button_action_execute(uint8_t action);
 
-// WP-8: Public helper that mirrors the reader-menu "Sync Fortschritt" flow.
+// WP-8: Public helper that mirrors the reader-menu "KoReader Sync" flow.
 // Runs the precheck → coordinator.beginSync() → STATE_SYNC_PROGRESS
 // transition. The dispatcher-driven progress screen handles the rest.
 // Safe to call from main loop context (e.g. from button_action_execute()'s

@@ -542,22 +542,29 @@ void ui_reader_menu_draw(BookReader& reader) {
     tall_overlay_begin();
     display_set_font_size(2);  // chrome always in Inter
 
-    // Title — truncate by pixel width to fit screen
-    String title = reader.getTitle();
-    int maxMenuTitleW = W - MARGIN_X * 2;
-    while (title.length() > 3 &&
-           display_text_width(title.c_str()) > maxMenuTitleW) {
-        title = title.substring(0, title.length() - 4) + "...";
+    // The book title is already prominent in the page header at y=0..66;
+    // showing it again here resulted in a long "Author • Title" line that
+    // had to be truncated and visually competed with the header. Show
+    // only the author in the menu overlay — the header gives the title,
+    // the menu gives the author, no duplication.
+    const int maxMenuTitleW = W - MARGIN_X * 2;
+    String authorLine = reader.getAuthor();
+    if (authorLine.length() == 0) {
+        // No author metadata — fall back to the title so the slot isn't
+        // empty. Truncate to fit.
+        authorLine = reader.getTitle();
     }
-    String titleLine = title;
-    if (reader.getAuthor().length() > 0) {
-        titleLine = reader.getAuthor() + " • " + title;
+    while (authorLine.length() > 3 &&
+           display_text_width(authorLine.c_str()) > maxMenuTitleW) {
+        authorLine = authorLine.substring(0, authorLine.length() - 4) + "...";
     }
-    while (titleLine.length() > 3 && display_text_width(titleLine.c_str()) > maxMenuTitleW) {
-        titleLine = titleLine.substring(0, titleLine.length() - 4) + "...";
-    }
-    int tw = display_text_width(titleLine.c_str());
-    display_draw_text((W - tw) / 2, 80, titleLine.c_str(), 0);
+    // Author baseline at y=110 leaves ~62 px between header baseline
+    // (y=48) and author baseline — clean visual gap so chrome-font 2
+    // glyph ascenders don't intrude on the header zone. All subsequent
+    // info lines are spaced by 32 px (one chrome-2 line height + 4 px
+    // breathing room) so nothing collides.
+    int tw = display_text_width(authorLine.c_str());
+    display_draw_text((W - tw) / 2, 110, authorLine.c_str(), 0);
 
     // Progress info — use compact format to fit 540px width
     char progStr[64];
@@ -565,7 +572,7 @@ void ui_reader_menu_draw(BookReader& reader) {
              reader.getCurrentChapter() + 1, reader.getTotalChapters(),
              reader.getCurrentPage() + 1, reader.getTotalPages());
     int pw = display_text_width(progStr);
-    display_draw_text((W - pw) / 2, 130, progStr, 6);
+    display_draw_text((W - pw) / 2, 150, progStr, 6);
 
     // Reading statistics line
     reader.updateReadingTime();
@@ -581,18 +588,18 @@ void ui_reader_menu_draw(BookReader& reader) {
                      (int)(totalSec / 60), (int)totalPages);
         }
         int sw = display_text_width(statsStr);
-        display_draw_text((W - sw) / 2, 165, statsStr, 8);
+        display_draw_text((W - sw) / 2, 185, statsStr, 8);
     }
 
     String chapterEta = String("Chapter: ") + formatRemainingTime(reader.getEstimatedChapterRemainingMs()) + " remaining";
     int cew = display_text_width(chapterEta.c_str());
-    display_draw_text((W - cew) / 2, 195, chapterEta.c_str(), 8);
+    display_draw_text((W - cew) / 2, 220, chapterEta.c_str(), 8);
 
     String bookEta = String("Book: ") + formatRemainingTime(reader.getEstimatedBookRemainingMs()) + " remaining";
     int bew = display_text_width(bookEta.c_str());
-    display_draw_text((W - bew) / 2, 225, bookEta.c_str(), 8);
+    display_draw_text((W - bew) / 2, 250, bookEta.c_str(), 8);
 
-    display_draw_hline(MARGIN_X, 255, W - MARGIN_X * 2, 10);
+    display_draw_hline(MARGIN_X, 272, W - MARGIN_X * 2, 10);
 
     // Menu items
     int y = MENU_START_Y + 40;
@@ -620,7 +627,7 @@ void ui_reader_menu_draw(BookReader& reader) {
 
     // Sync entry: placed next to Bookmarks so users can sync before
     // continuing to read. Credential entry lives in the web UI.
-    display_draw_text(indent, y, "Sync Fortschritt", 0);
+    display_draw_text(indent, y, "KoReader Sync", 0);
     display_draw_hline(MARGIN_X, y + 18, W - MARGIN_X * 2, 12);
     y += MENU_ITEM_H;
 
@@ -666,7 +673,7 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
     // Shift touch zone up so it aligns with what the user sees.
     int zoneTop = MENU_START_Y + 40 - FONT_H;
     int row = (y - zoneTop) / MENU_ITEM_H;
-    // Row count = base entries (Go to, TOC, Bookmarks, Sync Fortschritt,
+    // Row count = base entries (Go to, TOC, Bookmarks, KoReader Sync,
     // Settings, Library, Sleep = 7) + optional Back row when the reader
     // has navigation history. Keep in sync with ui_reader_menu_draw.
     int rowCount = reader.hasNavigationHistory() ? 8 : 7;
@@ -702,7 +709,7 @@ AppState ui_reader_menu_touch(int x, int y, BookReader& reader,
             case 2: // Bookmarks
                 setNeedsRedraw(true);
                 return STATE_BOOKMARKS;
-            case 3: { // Sync Fortschritt — push/pull progress to KoSync server
+            case 3: { // KoReader Sync — push/pull progress to KoSync server
                 if (!kosync_is_coordinator_initialized()) {
                     ui_toast_show("Sync error", 2500, true);
                     setNeedsRedraw(true);

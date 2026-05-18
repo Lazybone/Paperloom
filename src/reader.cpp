@@ -687,6 +687,23 @@ int BookReader::getTocChapterIndex(int index) {
     return _parser.getTocChapterIndex(index);
 }
 
+String BookReader::getTocLabelForChapter(int spineIndex) {
+    if (spineIndex < 0) return String();
+    const int tocCount = _parser.getTocCount();
+    String bestLabel;
+    int bestSpine = -1;
+    for (int i = 0; i < tocCount; ++i) {
+        const int ci = _parser.getTocChapterIndex(i);
+        if (ci < 0 || ci > spineIndex) continue;
+        if (ci > bestSpine) {
+            bestSpine = ci;
+            bestLabel = _parser.getTocLabel(i);
+            if (ci == spineIndex) break;  // exact match — stop
+        }
+    }
+    return bestLabel;
+}
+
 // ─── Bookmarks ──────────────────────────────────────────────────────
 
 void BookReader::addBookmark() {
@@ -817,7 +834,6 @@ bool BookReader::saveProgress() {
     // Cache invalidation: record EPUB file size so stale cache is discarded
     // if the file is replaced. Schema v2 (WP-11) adds kosync hash + last-sync
     // timestamp; older v1 files still load via loadProgress() with defaults.
-    doc["cache_version"] = 2;
     File ef = SD.open(_filepath.c_str(), FILE_READ);
     if (ef) {
         doc["epub_size"] = (uint32_t)ef.size();
@@ -826,8 +842,12 @@ bool BookReader::saveProgress() {
 
     // kosync fields. Empty hash / zero timestamp are valid defaults — they
     // simply indicate the hash hasn't been computed and the book has never
-    // been synced yet.
+    // been synced yet. The algo version tag pins the digest to a specific
+    // partial-MD5 offset table; bump kKosyncHashAlgoVersion in kosync_hash.h
+    // when the algorithm changes so older firmware's cached digests are
+    // discarded on the next load.
     doc["kosync_document_hash"] = _documentHash;
+    doc["kosync_hash_algo"] = kKosyncHashAlgoVersion;
     doc["kosync_last_sync"] = _lastSyncTimestamp;
 
     // Chapter title cache persistence removed to save heap — titles are
@@ -894,6 +914,18 @@ void BookReader::loadProgress() {
     // the next saveProgress() bumps the on-disk schema to v2 automatically.
     _documentHash = doc["kosync_document_hash"] | String("");
     _lastSyncTimestamp = doc["kosync_last_sync"] | (uint32_t)0;
+
+    // Discard hashes computed by older firmware with a different partial-MD5
+    // offset table — older digests are silently wrong and would break
+    // cross-device sync. The length guard skips files that simply never had
+    // a hash computed (algo tag is irrelevant when there's nothing to drop);
+    // getDocumentHash() will populate fresh on first access.
+    const int hashAlgo = doc["kosync_hash_algo"] | 0;
+    if (hashAlgo != kKosyncHashAlgoVersion && _documentHash.length() > 0) {
+        Serial.printf("Progress: dropping cached hash (algo=%d, expected %d)\n",
+                      hashAlgo, kKosyncHashAlgoVersion);
+        _documentHash = "";
+    }
     // Restore cached EPUB size so kosync_hash_is_valid() can decide if the
     // cached hash still matches the current file.
     _kosyncEpubSize = (size_t)(doc["epub_size"] | (uint32_t)0);
@@ -1010,14 +1042,30 @@ BookReader::ApplyResult BookReader::applyRemoteProgress(int chapter, int page,
     return ApplyResult::Ok;
 }
 
-void BookReader::releaseForSync() {
-    if (_releasedForSync) return;  // idempotent
+bool BookReader::releaseForSync() {
+    if (_releasedForSync) {
+        // Idempotent re-entry. Unusual — callers should only invoke this
+        // once per sync cycle. Logged so unexpected double-calls become
+        // visible in traces (the snapshot is from the FIRST call and may
+        // not reflect any position change since).
+        Serial.printf("[reader] releaseForSync: idempotent re-entry "
+                      "(snapshot from first call retained)\n");
+        return true;
+    }
     // Snapshot the bare minimum needed to re-open at the same position.
     _syncSavedFilepath = _filepath;
     _syncSavedChapter  = _currentChapter;
     _syncSavedPage     = _currentPage;
     // Persist progress to SD so even a crash-during-sync resumes correctly.
-    saveProgress();
+    // If save fails (SD missing/full/RO), do NOT close the book — keep the
+    // in-memory state so the user can keep reading. Caller must abort sync.
+    if (!saveProgress()) {
+        Serial.printf("[reader] releaseForSync ABORT: saveProgress failed (SD?)\n");
+        _syncSavedFilepath = String();
+        _syncSavedChapter  = 0;
+        _syncSavedPage     = 0;
+        return false;
+    }
     // Fully close the book. closeBook() releases parser, file handles,
     // chapter buffers, pagination state, current-page-lines — everything.
     closeBook();
@@ -1025,6 +1073,7 @@ void BookReader::releaseForSync() {
     Serial.printf("[reader] releaseForSync: closed, filepath=%s ch=%d pg=%d\n",
                   _syncSavedFilepath.c_str(),
                   _syncSavedChapter, _syncSavedPage);
+    return true;
 }
 
 bool BookReader::restoreAfterSync() {
