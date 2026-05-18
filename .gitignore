@@ -5,6 +5,19 @@
 build/
 compile_commands.json
 
+# ─── pioarduino / ESP-IDF custom-build artefacts ─────────────────────
+# Created when pioarduino's custom_sdkconfig feature triggers a partial
+# IDF rebuild (or when an aborted build leaves cache state behind).
+# All regenerated on demand — never tracked.
+.dummy/
+managed_components/
+dependencies.lock
+sdkconfig
+sdkconfig.defaults
+sdkconfig.old
+src/idf_component.yml
+src/CMakeLists.txt
+
 # ─── User-specific config (contains WiFi credentials) ───────────────
 include/config.h
 # Local maintainer scratch notes live under docs/; do NOT track them by
