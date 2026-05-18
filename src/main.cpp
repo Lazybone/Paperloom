@@ -699,12 +699,18 @@ static void enterDeepSleep(bool triggeredByButton) {
         }
         // KoSync transient screens collapse to reader on sleep; release any
         // held busy flag so the next wake is clean.
-        if (appState == STATE_KOSYNC_SETUP || appState == STATE_SYNC_CONFLICT ||
-            appState == STATE_SYNC_PROGRESS) {
+        if (appState == STATE_KOSYNC_SETUP || appState == STATE_SYNC_CONFLICT) {
+            // STATE_SYNC_PROGRESS is handled separately above via cancelIfBusy(),
+            // which fully tears down the coordinator. No additional clearBusy()
+            // needed here.
             resumeState = (int)STATE_READER;
             if (kosync_is_coordinator_initialized()) {
                 kosync_get_coordinator().clearBusy();
             }
+        }
+        // SYNC_PROGRESS still needs resumeState mapping to STATE_READER:
+        if (appState == STATE_SYNC_PROGRESS) {
+            resumeState = (int)STATE_READER;
         }
         prefs.putInt("sleepState", resumeState);
         prefs.putInt("sleepLibScrl", libraryScroll);

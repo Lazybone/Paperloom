@@ -235,17 +235,11 @@ void ui_sync_progress_draw() {
 }
 
 AppState ui_sync_progress_touch(int x, int y) {
-    // Cancel-Button: gesamte Footer-Bar reagiert.
-    if (y >= FOOTER_TOP) {
-        if (kosync_is_coordinator_initialized()) {
-            // Sofortiges visuelles Tap-Feedback: einmal mit gedunkeltem
-            // Button neu zeichnen, dann Cancel anfordern. Der naechste
-            // tick() im Dispatcher respektiert das Flag.
-            s_cancelLatched = true;
-            ui_sync_progress_draw();
-            kosync_get_coordinator().requestCancel();
-        }
-        return STATE_SYNC_PROGRESS;
+    // Only the footer-cancel button reacts. Taps elsewhere are ignored.
+    if (y >= FOOTER_TOP && kosync_is_coordinator_initialized()) {
+        s_cancelLatched = true;
+        ui_sync_progress_draw();   // immediate visual feedback
+        kosync_get_coordinator().requestCancel();
     }
     return STATE_SYNC_PROGRESS;
 }

@@ -381,7 +381,8 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
     // WP-10: release the WifiSyncGuard that finishConflict() kept alive
     // for the resolve-push round-trip. The member must be torn down here
     // so DMA-capable heap is freed immediately for the next page-paint.
-    if (wifi_) wifi_->release();
+    // wifi_.reset() invokes the destructor which calls release() — no need
+    // to do it explicitly here.
     wifi_.reset();
     return r;
 }
@@ -629,6 +630,9 @@ void KosyncSyncCoordinator::finishConflict() {
     pendingResult_.local       = pendingLocal_;
     pendingResult_.remote      = pendingRemote_;
     // wifi_ + busy_ bleiben aktiv — resolveConflict() reused beide.
+    // Pull-phase client is no longer needed; resolveConflict() uses its own
+    // stack-local KosyncClient.
+    client_.reset();
     // BookReader must be open before AwaitConflict because the user's
     // resolveConflict choice may trigger applyRemoteProgress which
     // reads the EPUB.
@@ -640,6 +644,7 @@ void KosyncSyncCoordinator::finishConflict() {
 SyncResult KosyncSyncCoordinator::takeResult() {
     SyncResult r = pendingResult_;
     pendingResult_ = SyncResult{};
+    busy_.store(false);   // defensive: terminal phases already cleared this
     enterPhase(SyncPhase::Idle);
     lastPhase_ = SyncPhase::Idle;
     return r;

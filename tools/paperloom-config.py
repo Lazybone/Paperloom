@@ -103,13 +103,6 @@ def _open(port: Optional[str]) -> serial.Serial:
     return ser
 
 
-def _is_response_line(line: str) -> bool:
-    """True for lines that are part of a protocol response (not firmware noise)."""
-    return (line.startswith("OK") or
-            line.startswith("ERR") or
-            line.startswith("NET\t") or
-            "\t" in line)  # key-value pairs inside OK_BEGIN blocks
-
 
 def _send_command(ser: serial.Serial, cmd: str) -> Tuple[bool, List[str]]:
     """Send a command and collect the response.
@@ -154,8 +147,9 @@ def _send_command(ser: serial.Serial, cmd: str) -> Tuple[bool, List[str]]:
         # Inside OK_BEGIN block
         if line == "OK_END":
             return True, lines
-        if _is_response_line(line) or True:  # collect all lines inside block
-            lines.append(line)
+        # Inside an OK_BEGIN block, collect every non-empty line until OK_END.
+        # (Firmware log lines mid-block are rare and harmless to include.)
+        lines.append(line)
 
     print("ERROR: timed out waiting for response.", file=sys.stderr)
     return False, []
