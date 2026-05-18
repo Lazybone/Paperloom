@@ -48,6 +48,11 @@ public:
     // Called from conflict dialog cancel path. Releases busy flag, no I/O.
     void       clearBusy();
 
+    // True if the most recent restoreAfterSync attempt failed. Dispatcher
+    // checks this and routes to STATE_LIBRARY with a toast.
+    bool restoreFailed() const { return restoreFailed_; }
+    void clearRestoreFailed() { restoreFailed_ = false; }
+
     bool       isBusy() const { return busy_.load(); }
 
     // ─── Phase-based API (WP-10) ───────────────────────────────────────
@@ -92,6 +97,7 @@ private:
     void runPushing();
     void finishWithToast(const String& toast, bool success);
     void finishConflict();
+    void tryRestoreReader_();
 
     BookReader&                    reader_;
     std::atomic<bool>              busy_{false};
@@ -105,6 +111,7 @@ private:
     SyncResult                     pendingResult_{};
     uint32_t                       wifiBudgetStartMs_ = 0;
     bool                           freshSync_         = false;  // 404-Pfad merken
+    bool                           restoreFailed_     = false;
     std::unique_ptr<WifiSyncGuard> wifi_;
     std::unique_ptr<KosyncClient>  client_;
 };

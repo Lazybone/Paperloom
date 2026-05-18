@@ -165,8 +165,14 @@ def _send_command(ser: serial.Serial, cmd: str) -> Tuple[bool, List[str]]:
 
 def cmd_status(args):
     ser = _open(args.port)
-    ok, lines = _send_command(ser, "STATUS")
-    ser.close()
+    try:
+        try:
+            ok, lines = _send_command(ser, "STATUS")
+        except serial.SerialException as e:
+            print(f"ERROR: serial communication failed: {e}", file=sys.stderr)
+            sys.exit(2)
+    finally:
+        ser.close()
     if not ok:
         print("\n".join(lines))
         sys.exit(1)
@@ -183,9 +189,15 @@ def cmd_status(args):
 
 def cmd_scan(args):
     ser = _open(args.port)
-    print("Scanning… (this takes ~3 seconds)")
-    ok, lines = _send_command(ser, "WIFI_SCAN")
-    ser.close()
+    try:
+        print("Scanning… (this takes ~3 seconds)")
+        try:
+            ok, lines = _send_command(ser, "WIFI_SCAN")
+        except serial.SerialException as e:
+            print(f"ERROR: serial communication failed: {e}", file=sys.stderr)
+            sys.exit(2)
+    finally:
+        ser.close()
     if not ok:
         print("\n".join(lines))
         sys.exit(1)
@@ -204,35 +216,59 @@ def cmd_scan(args):
 
 def cmd_wifi(args):
     ser = _open(args.port)
-    cmd = f"WIFI_SET\t{args.ssid}\t{args.password}"
-    ok, lines = _send_command(ser, cmd)
-    ser.close()
+    try:
+        try:
+            cmd = f"WIFI_SET\t{args.ssid}\t{args.password}"
+            ok, lines = _send_command(ser, cmd)
+        except serial.SerialException as e:
+            print(f"ERROR: serial communication failed: {e}", file=sys.stderr)
+            sys.exit(2)
+    finally:
+        ser.close()
     print("\n".join(lines))
     sys.exit(0 if ok else 1)
 
 
 def cmd_kosync(args):
     ser = _open(args.port)
-    device = args.device or ""
-    cmd = f"KOSYNC_SET\t{args.server}\t{args.user}\t{args.password}\t{device}"
-    ok, lines = _send_command(ser, cmd)
-    ser.close()
+    try:
+        try:
+            device = args.device or ""
+            cmd = f"KOSYNC_SET\t{args.server}\t{args.user}\t{args.password}\t{device}"
+            ok, lines = _send_command(ser, cmd)
+        except serial.SerialException as e:
+            print(f"ERROR: serial communication failed: {e}", file=sys.stderr)
+            sys.exit(2)
+    finally:
+        ser.close()
     print("\n".join(lines))
     sys.exit(0 if ok else 1)
 
 
 def cmd_reboot(args):
     ser = _open(args.port)
-    ok, lines = _send_command(ser, "REBOOT")
-    ser.close()
+    try:
+        try:
+            ok, lines = _send_command(ser, "REBOOT")
+        except serial.SerialException as e:
+            print(f"ERROR: serial communication failed: {e}", file=sys.stderr)
+            sys.exit(2)
+    finally:
+        ser.close()
     print("\n".join(lines))
     sys.exit(0 if ok else 1)
 
 
 def cmd_raw(args):
     ser = _open(args.port)
-    ok, lines = _send_command(ser, args.command)
-    ser.close()
+    try:
+        try:
+            ok, lines = _send_command(ser, args.command)
+        except serial.SerialException as e:
+            print(f"ERROR: serial communication failed: {e}", file=sys.stderr)
+            sys.exit(2)
+    finally:
+        ser.close()
     print("\n".join(lines))
     sys.exit(0 if ok else 1)
 

@@ -1,6 +1,7 @@
 #include "serial_console.h"
 #include "settings.h"
 #include "config.h"
+#include "kosync_sync.h"
 
 #include <Arduino.h>
 #include <WiFi.h>
@@ -70,6 +71,10 @@ static void cmd_wifi_set(const String& ssid, const String& pass) {
 }
 
 static void cmd_wifi_scan() {
+    if (kosync_is_coordinator_initialized() && kosync_get_coordinator().isBusy()) {
+        sc_err("Sync in progress — try later");
+        return;
+    }
     Serial.println("OK_BEGIN");
     int n = WiFi.scanNetworks(false);  // synchronous, ~2-3 s
     if (n < 0) {

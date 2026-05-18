@@ -131,9 +131,22 @@ RowStatus row_status_for(int rowIdx, SyncPhase ph) {
     // Mapping rank → row-index der aktiven Zeile:
     static constexpr int kActiveRowForRank[5] = { 1, 0, 2, 3, 4 };
     const int activeRow = kActiveRowForRank[r];
+    (void)activeRow;  // kept for documentation; comparison uses sequence rank
 
-    if (rowIdx <  activeRow) return RowStatus::Done;
-    if (rowIdx == activeRow) return RowStatus::Active;
+    // Compare by SEQUENCE rank (Hashing first, WaitingWifi second, ...),
+    // not by visual row order. Otherwise WaitingWifi (active row 0) would
+    // leave Hashing (row 1) as Pending even though Hashing already
+    // completed.
+    static constexpr int kRowProgressRank[ROW_COUNT] = {
+        1,  // row 0 = WLAN verbinden  → WaitingWifi sequence rank 1
+        0,  // row 1 = Buch-Hash       → Hashing sequence rank 0
+        2,  // row 2 = Server abrufen  → Pulling sequence rank 2
+        3,  // row 3 = Vergleich       → AwaitConflict sequence rank 3
+        4,  // row 4 = Fertigstellen   → Pushing sequence rank 4
+    };
+    const int rowSeqRank = kRowProgressRank[rowIdx];
+    if (rowSeqRank <  r) return RowStatus::Done;
+    if (rowSeqRank == r) return RowStatus::Active;
     return RowStatus::Pending;
 }
 

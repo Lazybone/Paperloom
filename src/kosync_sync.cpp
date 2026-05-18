@@ -363,7 +363,7 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
     reader_.releaseForSync();
     String err;
     int ps = client.pushProgress(hash, pendingLocal_, err);
-    reader_.restoreAfterSync();
+    tryRestoreReader_();
 
     const char* successMsg = keepLocal
                                  ? "Sync ok (Server aktualisiert)"
@@ -387,12 +387,24 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
 }
 
 void KosyncSyncCoordinator::clearBusy() {
+    if (wifi_) wifi_->release();
+    wifi_.reset();
+    client_.reset();
+    // Restore reader if a sync had released it (cancel-from-conflict path).
+    tryRestoreReader_();
     busy_.store(false);
 }
 
 // ─── WP-10 phase-based API ──────────────────────────────────────────────
 
 KosyncSyncCoordinator::~KosyncSyncCoordinator() = default;
+
+void KosyncSyncCoordinator::tryRestoreReader_() {
+    if (!reader_.restoreAfterSync()) {
+        Serial.printf("[kosync_sync] restoreAfterSync FAILED (SD removed? file deleted?)\n");
+        restoreFailed_ = true;
+    }
+}
 
 void KosyncSyncCoordinator::enterPhase(SyncPhase next) {
     phase_ = next;
@@ -435,7 +447,7 @@ bool KosyncSyncCoordinator::tick() {
         if (wifi_) wifi_->release();
         client_.reset();
         busy_.store(false);
-        reader_.restoreAfterSync();
+        tryRestoreReader_();
         enterPhase(SyncPhase::Cancelled);
     } else {
         switch (phase_) {
@@ -471,6 +483,10 @@ void KosyncSyncCoordinator::runHashing() {
         finishWithToast("KoSync nicht konfiguriert", false);
         return;
     }
+    // CRITICAL: snapshot local progress BEFORE releaseForSync closes the book
+    // and resets chapter/page to 0. Otherwise we'd push zeros to the server.
+    snapshot_local(reader_, s, pendingLocal_);
+
     // WP-10 Plan H: fully close the BookReader (parser + cached state) so
     // all reader DMA-cap RAM is freed before WiFi.begin. We restore in
     // finishWithToast()/finishConflict() before returning to the UI.
@@ -489,8 +505,15 @@ void KosyncSyncCoordinator::runHashing() {
         finishWithToast("Sync fehlgeschlagen: WLAN-Stack nicht startbar", false);
         return;
     }
-    wifiBudgetStartMs_ = millis();
-    enterPhase(SyncPhase::WaitingWifi);
+    if (br == WifiSyncGuard::BeginResult::AlreadyConnected) {
+        // WiFi already up (e.g. WiFi-upload-page is active). Skip WaitingWifi.
+        const Settings& s2 = settings_get();
+        client_.reset(new KosyncClient(s2.kosyncServer, s2.kosyncUser, s2.kosyncKey));
+        enterPhase(SyncPhase::Pulling);
+    } else {
+        wifiBudgetStartMs_ = millis();
+        enterPhase(SyncPhase::WaitingWifi);
+    }
 }
 
 void KosyncSyncCoordinator::runWaitingWifi() {
@@ -498,7 +521,6 @@ void KosyncSyncCoordinator::runWaitingWifi() {
     if (pr == WifiSyncGuard::PollResult::Connected) {
         const Settings& s = settings_get();
         client_.reset(new KosyncClient(s.kosyncServer, s.kosyncUser, s.kosyncKey));
-        snapshot_local(reader_, s, pendingLocal_);
         enterPhase(SyncPhase::Pulling);
         return;
     }
@@ -593,7 +615,7 @@ void KosyncSyncCoordinator::finishWithToast(const String& toast, bool success) {
     client_.reset();
     busy_.store(false);
     Serial.printf("[kosync_sync] restoring BookReader after sync\n");
-    reader_.restoreAfterSync();
+    tryRestoreReader_();
     enterPhase(success ? SyncPhase::Done : SyncPhase::Failed);
 }
 
@@ -608,7 +630,7 @@ void KosyncSyncCoordinator::finishConflict() {
     // resolveConflict choice may trigger applyRemoteProgress which
     // reads the EPUB.
     Serial.printf("[kosync_sync] restoring BookReader before conflict dialog\n");
-    reader_.restoreAfterSync();
+    tryRestoreReader_();
     enterPhase(SyncPhase::AwaitConflict);
 }
 
@@ -626,11 +648,13 @@ void KosyncSyncCoordinator::cancelIfBusy() {
                   static_cast<int>(phase_));
     cancelRequested_.store(true);
     if (wifi_) wifi_->release();
+    wifi_.reset();
     client_.reset();
+    // restoreAfterSync is idempotent — only acts if the book was actually
+    // released. finishConflict() already restores before AwaitConflict, so
+    // calling here is safe.
+    tryRestoreReader_();
     busy_.store(false);
-    // If we cancelled mid-sync, the BookReader is in released state. Restore
-    // it so the reader is usable on resume.
-    reader_.restoreAfterSync();
     enterPhase(SyncPhase::Idle);
     lastPhase_ = SyncPhase::Idle;
 }

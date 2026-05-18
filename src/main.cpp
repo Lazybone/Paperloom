@@ -579,12 +579,33 @@ constexpr uint32_t kSyncCancelledShownMs = 0;
 static void tickSyncProgress() {
     if (!kosync_is_coordinator_initialized()) return;
     auto& coord = kosync_get_coordinator();
+
+    // Fix R3: reset terminal-phase timer whenever we are in a non-terminal
+    // phase, so a stale value from a cancelled-via-cancelIfBusy sync cannot
+    // cause the dispatcher to skip past the display budget on the next sync.
+    SyncPhase phNow = coord.currentPhase();
+    if (phNow != SyncPhase::Done && phNow != SyncPhase::Failed &&
+        phNow != SyncPhase::Cancelled) {
+        s_syncTerminalPhaseEnteredAtMs = 0;
+    }
+
     const bool changed = coord.tick();
     if (changed) needsRedraw = true;
 
     SyncPhase ph = coord.currentPhase();
 
     if (ph == SyncPhase::AwaitConflict) {
+        // Fix R4: if restore failed during finishConflict, abandon to Library.
+        if (coord.restoreFailed()) {
+            ui_toast_show("Buch konnte nicht neu geöffnet werden — SD prüfen",
+                          3500, true);
+            coord.clearRestoreFailed();
+            coord.clearBusy();
+            appState = STATE_LIBRARY;
+            needsRedraw = true;
+            s_syncTerminalPhaseEnteredAtMs = 0;
+            return;
+        }
         ui_sync_conflict_set_data(coord.takeResult());
         appState = STATE_SYNC_CONFLICT;
         needsRedraw = true;
@@ -609,7 +630,15 @@ static void tickSyncProgress() {
             if (r.toast.length() > 0) {
                 ui_toast_show(r.toast, 2500, !r.success);
             }
-            appState = STATE_READER;
+            // Fix R4: if the book couldn't be reopened, route to Library.
+            if (coord.restoreFailed()) {
+                ui_toast_show("Buch konnte nicht neu geöffnet werden — SD prüfen",
+                              3500, true);
+                coord.clearRestoreFailed();
+                appState = STATE_LIBRARY;
+            } else {
+                appState = STATE_READER;
+            }
             needsRedraw = true;
             s_syncTerminalPhaseEnteredAtMs = 0;
         }
