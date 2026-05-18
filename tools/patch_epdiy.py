@@ -1,6 +1,7 @@
-"""PlatformIO pre-build script — patches upstream vroland/epdiy v2.0.0
+"""PlatformIO pre-build script — patches upstream vroland/epdiy
 so that it coexists with an Arduino Wire instance that owns I²C-0.
 
+--- epdiy#2.0.0 / [env:default] (ESP-IDF 4.x) ---
 Two transformations applied to `epd_board_v7.c::epd_board_init()`:
 
 1. The standalone `ESP_ERROR_CHECK(i2c_param_config(...))` line is removed.
@@ -17,6 +18,15 @@ Two transformations applied to `epd_board_v7.c::epd_board_init()`:
        ESP-IDF versions for the same condition)
      - calls i2c_param_config ONLY when this is the first-time install
        (i.e. nobody else owns the driver yet)
+
+--- epdiy#main / [env:test_pioarduino] (ESP-IDF 5.x) ---
+The main branch (bdb85cc+) migrated to the ESP-IDF 5.x I²C master driver
+API (`i2c_new_master_bus` / `i2c_master_bus_add_device`) in a new
+`epd_board_i2c.c` abstraction layer. The old `i2c_driver_install` /
+`i2c_param_config` no longer exist in epd_board_v7.c, so this patch is a
+no-op for that env (INSTALL_PATTERN won't match, prints a WARNING and
+returns without modifying the file). The Wire coexistence concern for ESP-IDF
+5.x I²C will be addressed separately if needed (Task 5+).
 
 The patch is idempotent and runs on every build, so it re-applies cleanly
 after `pio pkg install` re-downloads the lib.
