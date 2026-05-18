@@ -100,8 +100,40 @@ int epd_be_get_ambient_temp_cached() {
     return s_cached_temp_c;
 }
 
+// epdiy's main branch (ESP-IDF 5.x compatible) ships an EpdInitConfig
+// header that lets us share an existing I2C bus. Older epdiy 2.0.0
+// (used by espressif32@6.4.0 env) doesn't have this — we fall back to
+// the legacy epd_init() + patch_epdiy.py workaround on that path.
+#if __has_include(<epd_init_config.h>)
+  #include <epd_init_config.h>
+  #include <driver/i2c_master.h>
+  #define PAPERLOOM_EPDIY_HAS_INIT_CONFIG 1
+#endif
+
 void epd_be_init() {
+#if defined(PAPERLOOM_EPDIY_HAS_INIT_CONFIG)
+    // pioarduino path: pass Wire's already-initialized I2C bus to epdiy
+    // so epdiy doesn't try to create its own (which fails because Wire
+    // already owns port 0).
+    i2c_master_bus_handle_t shared_bus = NULL;
+    esp_err_t err = i2c_master_get_bus_handle(I2C_NUM_0, &shared_bus);
+    if (err == ESP_OK && shared_bus != NULL) {
+        EpdI2cConfig i2c_cfg = { .bus_handle = shared_bus };
+        EpdInitConfig init_cfg = { .i2c = &i2c_cfg };
+        epd_init_with_config(&epd_board_v7, &ED047TC1, EPD_OPTIONS_DEFAULT, &init_cfg);
+    } else {
+        // Wire didn't init (yet?) — let epdiy try to own the bus.
+        // This is unlikely; logs the issue for debugging.
+        Serial.printf("[epd_be_init] WARN: i2c_master_get_bus_handle failed (%d), "
+                      "falling back to epdiy bus ownership\n", err);
+        epd_init(&epd_board_v7, &ED047TC1, EPD_OPTIONS_DEFAULT);
+    }
+#else
+    // espressif32@6.4.0 path: legacy I2C driver, patch_epdiy.py handles
+    // the double-install case.
     epd_init(&epd_board_v7, &ED047TC1, EPD_OPTIONS_DEFAULT);
+#endif
+
     epd_set_vcom(PRO_VCOM_MV);
     // Force LCD pixel clock to a known rate so PCLK and CKV (RMT) are on the
     // same footing. epdiy@2.0.0 silently halves PCLK from 20→10 MHz when it
