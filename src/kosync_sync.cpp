@@ -288,6 +288,10 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
         s.kosyncKey.length() != 32 || s.kosyncCredentialsInvalid) {
         Serial.printf("[kosync_sync] resolve: not configured\n");
         r.toast = "KoSync nicht konfiguriert";
+        // finishConflict() kept wifi_ alive for this resolve. Tear it
+        // down on every exit path so the radio doesn't stay up.
+        wifi_.reset();
+        client_.reset();
         busy_.store(false);
         return r;
     }
@@ -296,6 +300,8 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
     if (hash.length() != 32) {
         Serial.printf("[kosync_sync] resolve: bad doc hash\n");
         r.toast = "Sync fehlgeschlagen: Serverfehler";
+        wifi_.reset();
+        client_.reset();
         busy_.store(false);
         return r;
     }
@@ -307,12 +313,16 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
     if (br == WifiSyncGuard::BeginResult::NoCredentials) {
         Serial.printf("[kosync_sync] resolve: no WiFi creds\n");
         r.toast = "WLAN nicht konfiguriert";
+        wifi_.reset();
+        client_.reset();
         busy_.store(false);
         return r;
     }
     if (br == WifiSyncGuard::BeginResult::WifiInitFailed) {
         Serial.printf("[kosync_sync] resolve: WiFi init failed\n");
         r.toast = "Sync fehlgeschlagen: WLAN-Stack nicht startbar";
+        wifi_.reset();
+        client_.reset();
         busy_.store(false);
         return r;
     }
@@ -328,6 +338,8 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
         if (pr != WifiSyncGuard::PollResult::Connected) {
             Serial.printf("[kosync_sync] resolve: WiFi connect failed\n");
             r.toast = "Sync fehlgeschlagen: Kein WLAN";
+            wifi_.reset();
+            client_.reset();
             busy_.store(false);
             return r;
         }
@@ -344,6 +356,8 @@ SyncResult KosyncSyncCoordinator::resolveConflict(bool keepLocal) {
         if (ar == BookReader::ApplyResult::OutOfBounds) {
             Serial.printf("[kosync_sync] resolve: applyRemote OutOfBounds\n");
             r.toast = "Sync fehlgeschlagen: Serverfehler";
+            wifi_.reset();
+            client_.reset();
             busy_.store(false);
             return r;
         }
