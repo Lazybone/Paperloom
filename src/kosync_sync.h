@@ -118,10 +118,3 @@ KosyncSyncCoordinator& kosync_get_coordinator();
 
 // Cheap guard for callers that may run before setup() finishes (e.g. HTTP handlers).
 bool kosync_is_coordinator_initialized();
-
-// WP-10 Plan G: call once from setup() after settings_init() to pre-allocate
-// the DMA-cap reserve that mbedtls's SSL record buffer needs at handshake
-// time. Safe to call before kosync_initialize_coordinator(). Returns false
-// if the 18 KB allocation fails (then sync will likely fail at SSL anyway —
-// log the failure so the user knows the platform is too tight).
-bool kosync_ssl_reserve_init();

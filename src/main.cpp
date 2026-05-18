@@ -1002,18 +1002,6 @@ void setup() {
     debug_trace_mark("setup:after_library_init");
     settings_init();
     debug_trace_mark("setup:after_settings_init");
-
-    // WP-10 Plan G: reserve 18 KB DMA-cap RAM early, while the heap is
-    // pristine. mbedtls's SSL record buffer (16 KB, baked into the
-    // Arduino-ESP32 mbedtls lib) cannot find this much contiguous space
-    // later from reader-context. The reserve is freed right before each
-    // SSL handshake by KosyncSyncCoordinator (see Plan G in kosync_sync.cpp).
-    Serial.printf("[ssl-reserve] init: dma_largest before=%u\n",
-                  (unsigned)heap_caps_get_largest_free_block(MALLOC_CAP_DMA));
-    if (!kosync_ssl_reserve_init()) {
-        Serial.println("[ssl-reserve] init: FAILED — sync from reader will likely fail at SSL");
-    }
-
     frontlight_init();
     frontlight_apply_from_settings();
     debug_trace_mark("setup:after_frontlight_init");
