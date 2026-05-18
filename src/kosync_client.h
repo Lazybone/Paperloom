@@ -1,7 +1,5 @@
 #pragma once
 #include <Arduino.h>
-#include <memory>
-#include <WiFiClientSecure.h>
 
 // KosyncProgress mirrors the kosync wire schema plus two Paperloom-internal
 // fields (`chapter`, `page`) that the coordinator derives from `progress` and
@@ -17,11 +15,11 @@ struct KosyncProgress {
     uint32_t timestamp;     // Unix seconds (server-assigned on push)
 };
 
-// Thin HTTPS wrapper around the kosync REST API. One instance per pull/push
-// call — the underlying WiFiClientSecure is lazily created and torn down
-// inside each call, so no state leaks across operations. Credentials are
-// validated in the constructor; if validation fails, both API calls
-// short-circuit to status 0 with a redacted error log.
+// Thin HTTPS wrapper around the kosync REST API. Uses ESP-IDF's esp_http_client
+// with a 2 KB TLS buffer (vs. WiFiClientSecure's 16 KB default) to fit in the
+// constrained heap available from reader-context. Credentials are validated in
+// the constructor; if validation fails, both API calls short-circuit to status 0
+// with a redacted error log.
 class KosyncClient {
 public:
     KosyncClient(const String& serverUrl,
@@ -49,9 +47,6 @@ private:
     String user_;
     String key_;
     bool   invalid_ = false;  // set when serverUrl/keyMd5 fails validation; calls then short-circuit to status 0
-    std::unique_ptr<WiFiClientSecure> client_;  // lazy; one per pull/push call (no across-call reuse)
 
-    void ensureClient_();
-    void resetClient_();
     bool validateDocHash_(const String& h) const;
 };
