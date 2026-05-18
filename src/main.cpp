@@ -784,8 +784,8 @@ static void enterDeepSleep(bool triggeredByButton) {
     // Drop power to RTC peripherals we don't need to keep alive — only the
     // ext1 wake source on BUTTON_PIN must survive sleep. Shaves a few µA.
     esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_PERIPH, ESP_PD_OPTION_OFF);
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_SLOW_MEM, ESP_PD_OPTION_OFF);
-    esp_sleep_pd_config(ESP_PD_DOMAIN_RTC_FAST_MEM, ESP_PD_OPTION_OFF);
+    // ESP_PD_DOMAIN_RTC_SLOW_MEM / RTC_FAST_MEM were removed in ESP-IDF 5.x
+    // (Arduino-ESP32 3.x). RTC memory is now always retained during deep sleep.
 
     // CRITICAL: Disable GPIO wakeup source configured for light sleep.
     // If we don't clear this, the touch INT pin (GPIO 47) can trigger an
@@ -797,7 +797,9 @@ static void enterDeepSleep(bool triggeredByButton) {
     // Wake when button goes LOW (active LOW, pressed)
     // ESP_EXT1_WAKEUP_ALL_LOW: wake when ALL configured pins are LOW
     // Since we only have one pin, this effectively means "wake when this pin is LOW"
-    esp_sleep_enable_ext1_wakeup(1ULL << BUTTON_PIN, ESP_EXT1_WAKEUP_ALL_LOW);
+    // ESP_EXT1_WAKEUP_ALL_LOW removed in ESP-IDF 5.x; use ESP_EXT1_WAKEUP_ANY_LOW.
+    // Single-pin usage is semantically identical.
+    esp_sleep_enable_ext1_wakeup(1ULL << BUTTON_PIN, ESP_EXT1_WAKEUP_ANY_LOW);
 
     if (Serial) {
         Serial.println("Sleep: entering deep sleep now");

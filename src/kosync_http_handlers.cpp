@@ -76,19 +76,11 @@ bool is_valid_kosync_user(const String& u) {
 
 // Compute MD5(plaintext) → 32-char lowercase hex string.
 //
-// We use the one-shot `mbedtls_md5_ret` because the ESP32 mbedtls port maps
-// `mbedtls_md5_init/_starts/_update/_finish/_free` to `esp_md5_*` aliases via
-// `port/include/md5_alt.h`, but the *non*-`_ret` lifecycle wrappers
-// (`mbedtls_md5_starts` in particular) are declared deprecated and not
-// actually defined in the shipped libmbedcrypto.a — so referencing them from
-// live code triggers an undefined-symbol link error. The one-shot
-// `mbedtls_md5_ret` is a real exported function in `md5.c.obj` and is the
-// safe portable choice.  See also `src/ui/ui_reader_kosync_setup.cpp` —
-// which only links because the calling function is gc'd out by
-// `--gc-sections`.  Do not copy that pattern here.
+// mbedtls 3.x (ESP-IDF 5.x / Arduino-ESP32 3.x) removed the _ret suffix
+// variants. Use the plain one-shot mbedtls_md5() with identical signature.
 String md5_hex(const String& plaintext) {
     uint8_t digest[16];
-    const int rc = mbedtls_md5_ret(
+    const int rc = mbedtls_md5(
         reinterpret_cast<const uint8_t*>(plaintext.c_str()),
         plaintext.length(),
         digest);

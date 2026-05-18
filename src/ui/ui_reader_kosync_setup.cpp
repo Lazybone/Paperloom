@@ -210,9 +210,9 @@ bool is_valid_password(const String& p) {
 // but not implemented in the prebuilt binary.
 String md5_hex(const String& plaintext) {
     uint8_t digest[16];
-    if (mbedtls_md5_ret(reinterpret_cast<const uint8_t*>(plaintext.c_str()),
-                        plaintext.length(), digest) != 0) {
-        Serial.println("[kosync_setup] mbedtls_md5_ret failed");
+    if (mbedtls_md5(reinterpret_cast<const uint8_t*>(plaintext.c_str()),
+                    plaintext.length(), digest) != 0) {
+        Serial.println("[kosync_setup] mbedtls_md5 failed");
         return String();
     }
 

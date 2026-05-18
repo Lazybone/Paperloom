@@ -104,8 +104,8 @@ String kosync_compute_document_hash(const String& epubFilePath) {
     }
 
     uint8_t digest[16];
-    if (mbedtls_md5_ret(buf, bufLen, digest) != 0) {
-        Serial.println("[kosync_hash] mbedtls_md5_ret failed");
+    if (mbedtls_md5(buf, bufLen, digest) != 0) {
+        Serial.println("[kosync_hash] mbedtls_md5 failed");
         return String();
     }
 
