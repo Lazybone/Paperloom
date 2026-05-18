@@ -128,11 +128,6 @@ RowStatus row_status_for(int rowIdx, SyncPhase ph) {
     if (r < 0) return RowStatus::Pending;
     if (r >= 5) return RowStatus::Done;
 
-    // Mapping rank → row-index der aktiven Zeile:
-    static constexpr int kActiveRowForRank[5] = { 1, 0, 2, 3, 4 };
-    const int activeRow = kActiveRowForRank[r];
-    (void)activeRow;  // kept for documentation; comparison uses sequence rank
-
     // Compare by SEQUENCE rank (Hashing first, WaitingWifi second, ...),
     // not by visual row order. Otherwise WaitingWifi (active row 0) would
     // leave Hashing (row 1) as Pending even though Hashing already

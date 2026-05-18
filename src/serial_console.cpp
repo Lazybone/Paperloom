@@ -72,7 +72,7 @@ static void cmd_wifi_set(const String& ssid, const String& pass) {
 
 static void cmd_wifi_scan() {
     if (kosync_is_coordinator_initialized() && kosync_get_coordinator().isBusy()) {
-        sc_err("Sync in progress — try later");
+        sc_err("Sync läuft — bitte später");
         return;
     }
     Serial.println("OK_BEGIN");

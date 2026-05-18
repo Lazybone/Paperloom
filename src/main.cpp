@@ -599,8 +599,8 @@ static void tickSyncProgress() {
         if (coord.restoreFailed()) {
             ui_toast_show("Buch konnte nicht neu geöffnet werden — SD prüfen",
                           3500, true);
-            coord.clearRestoreFailed();
             coord.clearBusy();
+            coord.clearRestoreFailed();
             appState = STATE_LIBRARY;
             needsRedraw = true;
             s_syncTerminalPhaseEnteredAtMs = 0;

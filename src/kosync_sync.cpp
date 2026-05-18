@@ -390,9 +390,11 @@ void KosyncSyncCoordinator::clearBusy() {
     if (wifi_) wifi_->release();
     wifi_.reset();
     client_.reset();
-    // Restore reader if a sync had released it (cancel-from-conflict path).
     tryRestoreReader_();
+    cancelRequested_.store(false);
     busy_.store(false);
+    enterPhase(SyncPhase::Idle);
+    lastPhase_ = SyncPhase::Idle;
 }
 
 // ─── WP-10 phase-based API ──────────────────────────────────────────────
@@ -417,6 +419,7 @@ bool KosyncSyncCoordinator::beginSync(String& outToast) {
         return false;
     }
     cancelRequested_.store(false);
+    restoreFailed_     = false;
     pendingLocal_      = KosyncProgress{};
     pendingRemote_     = KosyncProgress{};
     pendingResult_     = SyncResult{};
@@ -448,6 +451,7 @@ bool KosyncSyncCoordinator::tick() {
         client_.reset();
         busy_.store(false);
         tryRestoreReader_();
+        cancelRequested_.store(false);
         enterPhase(SyncPhase::Cancelled);
     } else {
         switch (phase_) {
@@ -507,8 +511,7 @@ void KosyncSyncCoordinator::runHashing() {
     }
     if (br == WifiSyncGuard::BeginResult::AlreadyConnected) {
         // WiFi already up (e.g. WiFi-upload-page is active). Skip WaitingWifi.
-        const Settings& s2 = settings_get();
-        client_.reset(new KosyncClient(s2.kosyncServer, s2.kosyncUser, s2.kosyncKey));
+        client_.reset(new KosyncClient(s.kosyncServer, s.kosyncUser, s.kosyncKey));
         enterPhase(SyncPhase::Pulling);
     } else {
         wifiBudgetStartMs_ = millis();
