@@ -644,7 +644,6 @@ void KosyncSyncCoordinator::finishConflict() {
 SyncResult KosyncSyncCoordinator::takeResult() {
     SyncResult r = pendingResult_;
     pendingResult_ = SyncResult{};
-    busy_.store(false);   // defensive: terminal phases already cleared this
     enterPhase(SyncPhase::Idle);
     lastPhase_ = SyncPhase::Idle;
     return r;
